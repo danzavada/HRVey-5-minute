@@ -1,6 +1,6 @@
 # HRVey 5-min
 
-R-peak detection for **5-minute vector ECG PDFs**, entirely in the browser — offline, no upload, no install. A web port of the `MonkECG-5` desktop app; the signal pipeline is a faithful port of its NumPy/SciPy code (verified bit-for-bit).
+R-peak detection for **5-minute vector ECG PDFs**, entirely in the browser — offline, no upload, no install.
 
 ## Use
 
