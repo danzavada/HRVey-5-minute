@@ -33,6 +33,14 @@
     .brand small{font-weight:600;color:var(--accent-d);font-size:11px;letter-spacing:.04em}
     .sep{width:1px;align-self:stretch;background:var(--line);margin:2px 4px}
     .spacer{flex:1}
+    .toolsens{display:inline-flex;align-items:center;gap:8px;padding:0 4px;color:var(--muted);font-size:12px}
+    .toolsens input[type=range]{width:120px;accent-color:var(--accent-d)}
+    .toolsens input[type=range]:disabled{opacity:.4}
+    .toolsens b{min-width:14px;text-align:center;color:var(--ink)}
+    .rowsbadge{font-size:12px;font-weight:600;padding:3px 9px;border-radius:7px;white-space:nowrap}
+    .rowsbadge.good{background:#dcfce7;color:#166534;border:1px solid #86efac}
+    .rowsbadge.bad{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+    .rowsbadge[hidden]{display:none}
     button.btn{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:8px;
       padding:7px 12px;cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s}
     button.btn:hover{background:var(--btn-h)}
@@ -40,6 +48,7 @@
     button.btn:disabled{opacity:.4;cursor:not-allowed}
     button.btn.primary{background:var(--accent-d);border-color:var(--accent-d);color:#fff;font-weight:600}
     button.btn.primary:hover{background:var(--accent)}
+    button.btn.on{background:var(--accent-d);border-color:var(--accent-d);color:#fff}
     .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
     .seg button{font:inherit;color:var(--muted);background:transparent;border:0;padding:7px 12px;cursor:pointer;
       border-right:1px solid var(--line)}
@@ -164,14 +173,18 @@
     <span class="seg annot" id="annot" title="Annotate the selected beat">
       <button class="pvc" id="btnPvc" disabled>PVC<kbd>P</kbd></button>
       <button class="pac" id="btnPac" disabled>PAC<kbd>Q</kbd></button>
-      <button class="uda" id="btnUda" disabled>Can't detect<kbd>U</kbd></button>
     </span>
     <span class="sep"></span>
-    <button class="btn" id="btnRedetect" title="Detect R-peaks at the current sensitivity" disabled>Detect</button>
     <button class="btn" id="btnFit" title="Fit page to window (Z)" disabled>Fit</button>
+    <span class="toolsens" title="Detection sensitivity — higher finds more (smaller) peaks. Re-detects automatically.">
+      <label for="sensPanel">Sensitivity</label>
+      <input type="range" id="sensPanel" min="1" max="10" step="1" value="5" disabled>
+      <b id="sensPanelVal">5</b>
+    </span>
+    <span class="sep"></span>
+    <button class="btn" id="btnRows" title="Highlight the ECG rows the detector recognised (debug)" disabled>Rows</button>
+    <span class="rowsbadge" id="rowsBadge" hidden></span>
     <span class="spacer"></span>
-    <button class="btn primary" id="btnExport" title="Export R-R intervals to Excel" disabled>Export .xlsx</button>
-    <button class="btn" id="btnSettings" title="Settings">⚙</button>
   </header>
 
   <div class="workspace">
@@ -190,7 +203,6 @@
         <span><i class="tag" style="background:var(--blue)"></i>Long RR</span>
         <span><i class="tag" style="background:var(--orange)"></i>Short RR</span>
         <span><i class="tag" style="background:var(--red)"></i>PVC / PAC</span>
-        <span><i class="tag" style="background:var(--gray)"></i>Can't detect</span>
       </div>
     </aside>
 
@@ -201,16 +213,14 @@
     </div>
 
     <aside class="panel panel-right">
-      <h2><span>Recording</span></h2>
+      <h2><span>Export</span></h2>
       <div class="form">
         <label for="fId">Subject ID</label>
-        <input type="text" id="fId" value="ZK-ECG000" autocomplete="off" spellcheck="false">
+        <input type="text" id="fId" placeholder="ZK-ECG000" autocomplete="off" spellcheck="false">
         <label for="fDate">Recording date</label>
-        <input type="date" id="fDate">
-        <label for="sensPanel">Detection sensitivity</label>
-        <div class="sensrow"><span>1</span><input type="range" id="sensPanel" min="1" max="10" step="1" value="5"><span>10</span><span class="val" id="sensPanelVal">5</span></div>
-        <div class="hint">Higher = more (smaller) peaks. Adjust to re-run the detector.</div>
-        <button class="btn save" id="btnSavePdf" disabled title="Save the opened PDF, named from the fields above">Save PDF as…</button>
+        <input type="text" id="fDate" placeholder="YYYY-MM-DD" autocomplete="off" spellcheck="false">
+        <button class="btn save" id="btnSavePdf" disabled title="Save the opened PDF, named from the fields above">Export .pdf</button>
+        <button class="btn primary save" id="btnExport" disabled title="Export R-R intervals to Excel">Export .xlsx</button>
         <div class="hint filename" id="nameHint"></div>
       </div>
     </aside>
@@ -220,25 +230,6 @@
     <span class="dot"></span>
     <span id="status">Open a 5-minute vector ECG PDF — R-peaks are detected automatically.</span>
   </footer>
-</div>
-
-<div class="backdrop" id="settingsModal" hidden>
-  <div class="modal">
-    <h3>Settings</h3>
-    <p class="sub">Keyboard shortcuts.</p>
-    <div class="grp">
-      <label class="lbl">Mode shortcuts (click a key, then press a new one)</label>
-      <div class="keys">
-        <div class="kb"><span class="lbl">Select</span><button class="keycap" id="kbSelect" data-act="select">S</button></div>
-        <div class="kb"><span class="lbl">Add peak</span><button class="keycap" id="kbAdd" data-act="add">A</button></div>
-        <div class="kb"><span class="lbl">Delete</span><button class="keycap" id="kbDel" data-act="del">D</button></div>
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn" id="setCancel">Cancel</button>
-      <button class="btn primary" id="setOk">Apply</button>
-    </div>
-  </div>
 </div>
 
 <input id="fileInput" type="file" accept=".pdf,application/pdf" hidden>
@@ -275,7 +266,7 @@ const S = {
   peakIdx:[], autoPeaks:new Set(), manualRows:{}, tags:{},
   history:[], selected:null,
   peakImg:null,               // Float64 pairs, parallel to peakIdx (image space)
-  mode:"select", sensitivity:5, hasDetected:false, _loading:false,
+  mode:"select", sensitivity:5, _loading:false, showRows:false,
   keys:{select:"s", add:"a", del:"d"},
   zoom:1, panX:0, panY:0, fitZoom:MIN_ZOOM,
   pdfName:"ecg", pdfBytes:null,
@@ -407,7 +398,34 @@ function peakColor(idx, cls){
   if(cls.short.has(idx)) return COL.short;
   return COL.normal;
 }
+// Debug overlay: mark every ECG row the detector actually recognised. Missing
+// strips show up as bands with no green baseline line, so a "10 / 14 rows" badge
+// plus the gaps make row-detection failures obvious.
+function drawRowOverlay(){
+  if(!S.meta) return;
+  const by=S.meta.baseline_y;
+  const x0=Math.max(0, i2c(0,0)[0]), x1=Math.min(cssW, i2c(S.baseW,0)[0]);
+  ctx.save(); ctx.setLineDash([]);
+  ctx.font="600 12px system-ui,sans-serif"; ctx.textAlign="left"; ctx.textBaseline="bottom";
+  for(const r of S.validRows){
+    const y=i2c(0, by[r]*RENDER_SCALE)[1];
+    ctx.strokeStyle="rgba(22,163,74,.55)"; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke();
+    const t="Row "+(r+1), lx=x0+5, ly=y-3;
+    ctx.lineWidth=3; ctx.strokeStyle="rgba(255,255,255,.9)"; ctx.strokeText(t,lx,ly);
+    ctx.fillStyle="#166534"; ctx.fillText(t,lx,ly);
+  }
+  ctx.restore();
+}
+function updateRowsBadge(){
+  const b=$("#rowsBadge");
+  if(!S.meta){ b.hidden=true; return; }
+  const nr=S.validRows.length;
+  b.hidden=false; b.textContent=nr+" / "+N_ROWS+" rows";
+  b.className="rowsbadge "+(nr>=N_ROWS?"good":"bad");
+}
 function drawOverlay(){
+  if(S.showRows) drawRowOverlay();
   // rebuild cached image positions
   const n=S.peakIdx.length;
   S.peakImg = new Float64Array(n*2);
@@ -457,63 +475,46 @@ function draw(){ redraw(); updatePanel(); }
 
 /* ── Panel / status ── */
 function fmt1(x){ return (Math.round(x*10)/10).toFixed(1); }
-function rrArray(){ // ms diffs across all peaks (no uda filtering) for stats
+function getRR(){ // R-R intervals (ms) across all peaks
   const out=[]; for(let i=1;i<S.peakIdx.length;i++) out.push((S.time[S.peakIdx[i]]-S.time[S.peakIdx[i-1]])*1000);
   return out;
 }
-function getRRexport(){ // mirror get_rr_ms: null when either endpoint is uda
-  const out=[];
-  for(let i=1;i<S.peakIdx.length;i++){
-    const a=S.peakIdx[i-1], b=S.peakIdx[i];
-    out.push((S.tags[a]==="uda"||S.tags[b]==="uda") ? null : (S.time[b]-S.time[a])*1000);
-  }
-  return out;
-}
-function getAnnotations(){ // mirror get_annotations
-  const out=[];
-  for(let i=1;i<S.peakIdx.length;i++){
-    const a=S.peakIdx[i-1], b=S.peakIdx[i];
-    if(S.tags[a]==="uda"||S.tags[b]==="uda") out.push("Unable to detect accurately");
-    else { const t=S.tags[b]; out.push(t ? t.toUpperCase() : "Normal"); }
-  }
+function getAnnotations(){ // one label per interval, indexed by the later beat
+  const out=[]; for(let i=1;i<S.peakIdx.length;i++){ const t=S.tags[S.peakIdx[i]]; out.push(t?t.toUpperCase():"Normal"); }
   return out;
 }
 function updatePanel(){
   const list=$("#rrlist"); list.innerHTML="";
-  const rrExp=getRRexport();
-  $("#rrCount").textContent = rrExp.length ? rrExp.length+"" : "";
-  if(!rrExp.length){
+  const rr=getRR();
+  $("#rrCount").textContent = rr.length ? rr.length+"" : "";
+  if(!rr.length){
     const li=document.createElement("li"); li.className="empty";
     li.textContent = S.peakIdx.length ? "Need ≥2 peaks" : "No peaks yet";
     list.appendChild(li);
   } else {
     const cls=C.classifyBeats(S.time,S.peakIdx);
-    for(let i=0;i<rrExp.length;i++){
+    for(let i=0;i<rr.length;i++){
       const beat=S.peakIdx[i+1];
       const li=document.createElement("li");
       if(beat===S.selected) li.classList.add("sel");
       const col=peakColor(beat,cls);
       if(cls.long.has(beat)||cls.short.has(beat)||S.tags[beat]) li.classList.add("abn");
-      const ms=rrExp[i];
       li.innerHTML=`<span class="i"><i class="tag" style="background:${col}"></i>RR${String(i+1).padStart(2,"0")}</span>`+
-        `<span class="v">${ms==null?"—":Math.round(ms)+" ms"}</span>`;
+        `<span class="v">${Math.round(rr[i])} ms</span>`;
       li.onclick=()=>{ focusPeak(beat); };
       list.appendChild(li);
     }
   }
-  // stats
-  const all=rrArray();
-  if(all.length){
-    const valid=getRRexport().filter(v=>v!=null);
-    const mean=all.reduce((a,b)=>a+b,0)/all.length;
+  if(rr.length){
+    const mean=rr.reduce((a,b)=>a+b,0)/rr.length;
     $("#sHR").textContent=fmt1(60000/mean)+" bpm";
     $("#sMean").textContent=Math.round(mean)+" ms";
-    const hv=(valid.length>=2)?hrv(valid):{rmssd:null,sdnn:null};
+    const hv=(rr.length>=2)?hrv(rr):{rmssd:null,sdnn:null};
     $("#sRMSSD").textContent=hv.rmssd==null?"—":fmt1(hv.rmssd)+" ms";
     $("#sSDNN").textContent=hv.sdnn==null?"—":fmt1(hv.sdnn)+" ms";
   } else { $("#sHR").textContent=$("#sMean").textContent=$("#sRMSSD").textContent=$("#sSDNN").textContent="—"; }
   $("#sPeaks").textContent=String(S.peakIdx.length);
-  $("#btnExport").disabled = rrExp.length===0;
+  $("#btnExport").disabled = rr.length===0;
 }
 function hrv(vals){
   const n=vals.length, mean=vals.reduce((a,b)=>a+b,0)/n;
@@ -532,9 +533,9 @@ function focusPeak(beat){
 function setStatus(msg, ok){ $("#status").textContent=msg; $("#statusbar").classList.toggle("ok",!!ok); }
 function liveStatus(){
   const n=S.peakIdx.length;
-  if(n<2){ setStatus(`${n} peak${n===1?"":"s"} — add or delete peaks, then Export.`, n>0); return; }
-  const all=rrArray(); const mean=all.reduce((a,b)=>a+b,0)/all.length;
-  setStatus(`${n} peaks  ·  mean RR ${mean.toFixed(0)} ms  ·  HR ${(60000/mean).toFixed(0)} bpm  ·  select a beat to annotate (P / Q / U)`, true);
+  if(n<2){ setStatus(`${n} peak${n===1?"":"s"} — add or delete peaks, then export.`, n>0); return; }
+  const rr=getRR(); const mean=rr.reduce((a,b)=>a+b,0)/rr.length;
+  setStatus(`${n} peaks  ·  mean RR ${mean.toFixed(0)} ms  ·  HR ${(60000/mean).toFixed(0)} bpm  ·  select a beat to annotate (P / Q)`, true);
 }
 
 /* ── Modes / annotate button sync ── */
@@ -542,7 +543,7 @@ function setMode(m){
   S.mode=m;
   document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
   if(m!=="add") S.cursor=null;
-  const hint={ select:"Select: click a beat to select it, then annotate (P PVC · Q PAC · U can't-detect). Drag to pan, Ctrl+wheel to zoom.",
+  const hint={ select:"Select: click a beat to select it, then annotate (P = PVC · Q = PAC). Drag to pan, Ctrl+wheel to zoom.",
     add:"Add: click on a beat to place an R-peak (snaps to the local max). Shift+click places exactly at the cursor.",
     delete:"Delete: click a peak to remove it." }[m];
   if(hint && S.base) setStatus(hint); redraw();
@@ -550,10 +551,9 @@ function setMode(m){
 function syncAnnot(){
   const has=S.selected!=null;
   const tag=has?S.tags[S.selected]:null;
-  $("#btnPvc").disabled=!has; $("#btnPac").disabled=!has; $("#btnUda").disabled=!has;
+  $("#btnPvc").disabled=!has; $("#btnPac").disabled=!has;
   $("#btnPvc").classList.toggle("on",tag==="pvc");
   $("#btnPac").classList.toggle("on",tag==="pac");
-  $("#btnUda").classList.toggle("on",tag==="uda");
   updatePanel();
 }
 
@@ -614,7 +614,8 @@ zoomBadge.onclick=fitView;
 
 /* ── Keyboard ── */
 window.addEventListener("keydown",e=>{
-  if(kbListening) return;                          // capture handled by settings
+  const tag=(e.target&&e.target.tagName)||"";
+  if(tag==="INPUT"||tag==="TEXTAREA") return;       // don't hijack keys while typing in the ID/date fields
   const k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && k==="z"){ e.preventDefault(); undo(); return; }
   if((e.ctrlKey||e.metaKey) && k==="o"){ e.preventDefault(); openPicker(); return; }
@@ -626,7 +627,6 @@ window.addEventListener("keydown",e=>{
   else if(k==="z") fitView();
   else if(k==="p"){ if(S.selected!=null) applyTag("pvc"); }
   else if(k==="q"){ if(S.selected!=null) applyTag("pac"); }
-  else if(k==="u"){ if(S.selected!=null) applyTag("uda"); }
   else if(k==="delete"||k==="backspace"){ if(S.selected!=null){ pushUndo();
     const li=S.peakIdx.indexOf(S.selected); if(li>=0){ S.peakIdx.splice(li,1); S.autoPeaks.delete(S.selected); delete S.manualRows[S.selected]; }
     S.selected=null; draw(); syncAnnot(); liveStatus(); } }
@@ -684,28 +684,39 @@ async function openPdfFile(file){
     if(!meta.voltage.length){ throw new Error("No ECG vector traces found on page 2 (expected thin 0.4–0.8 pt strokes)."); }
     const recDate=await extractRecordingDate(pdf, file.name);
 
-    // commit state — peaks are NOT auto-detected; the user sets sensitivity and clicks Detect
+    busy.textContent="Detecting R-peaks…"; await wait();
+    const peaks=C.detectPeaks(meta.voltage, S.sensitivity);
+
+    // commit state (detection runs automatically here and whenever the sensitivity slider moves)
     S.base=base; S.baseW=base.width; S.baseH=base.height;
     S.pageWpt=base.width/RENDER_SCALE; S.pageHpt=base.height/RENDER_SCALE;
     S.meta=meta; S.time=meta.time; S.voltage=meta.voltage;
     const rset=new Set(); for(const r of meta.raw_r) rset.add(r); S.validRows=Array.from(rset).sort((a,b)=>a-b);
-    S.peakIdx=[]; S.autoPeaks=new Set(); S.manualRows={}; S.tags={}; S.history=[]; S.selected=null; S.hasDetected=false;
+    S.peakIdx=Array.from(new Set(peaks)).sort((a,b)=>a-b);
+    S.autoPeaks=new Set(S.peakIdx); S.manualRows={}; S.tags={}; S.history=[]; S.selected=null;
     S.pdfName=file.name.replace(/\.pdf$/i,"");
+    S.fitZoom=MIN_ZOOM; S.zoom=1;
     if(recDate) $("#fDate").value=recDate;
-    $("#btnRedetect").textContent="Detect"; $("#btnSavePdf").disabled=false;
-    document.querySelectorAll(".toolbar button").forEach(b=>{ if(b.id!=="btnSettings"&&b.id!=="btnOpen") b.disabled=false; });
-    document.querySelectorAll("#modes button").forEach(b=>b.disabled=false);
+    S.showRows = S.validRows.length < N_ROWS;          // auto-reveal the overlay when a strip is missing
+    document.querySelectorAll(".btn").forEach(b=>{ if(b.id!=="btnOpen") b.disabled=false; });
+    document.querySelectorAll("#modes button, #annot button").forEach(b=>b.disabled=false);
+    $("#sensPanel").disabled=false; $("#btnRows").classList.toggle("on", S.showRows);
+    $("#btnSavePdf").disabled=false;
     wrap.classList.remove("empty");
+    updateRowsBadge();
     setMode("select"); fitView(); draw(); syncAnnot(); updateNameHint();
-    setStatus(`Loaded "${S.pdfName}"${recDate?` (recorded ${recDate})`:""} — set the sensitivity and click Detect.`, true);
+    const rowNote = S.validRows.length<N_ROWS ? `  ⚠ only ${S.validRows.length}/${N_ROWS} rows recognised` : "";
+    setStatus(`Loaded "${S.pdfName}"${recDate?` (recorded ${recDate})`:""} — ${S.peakIdx.length} R-peaks detected.${rowNote}`, true);
   }catch(err){ console.error(err); setStatus("Error: "+(err&&err.message||err)); }
   finally{ busy.hidden=true; $("#btnOpen").disabled=false; S._loading=false; }
 }
 $("#btnClose").onclick=()=>{
-  S.base=null; S.meta=null; S.voltage=null; S.peakIdx=[]; S.selected=null; S.history=[]; S.hasDetected=false; S.pdfBytes=null;
+  S.base=null; S.meta=null; S.voltage=null; S.peakIdx=[]; S.selected=null; S.history=[]; S.pdfBytes=null; S.showRows=false;
   wrap.classList.add("empty");
-  $("#btnRedetect").textContent="Detect"; $("#btnSavePdf").disabled=true; $("#fDate").value="";
-  document.querySelectorAll(".toolbar button").forEach(b=>{ if(b.id!=="btnOpen"&&b.id!=="btnSettings") b.disabled=true; });
+  $("#btnSavePdf").disabled=true; $("#btnExport").disabled=true; $("#sensPanel").disabled=true;
+  $("#fDate").value=""; $("#rowsBadge").hidden=true; $("#btnRows").classList.remove("on");
+  document.querySelectorAll(".btn").forEach(b=>{ if(b.id!=="btnOpen") b.disabled=true; });
+  document.querySelectorAll("#modes button, #annot button").forEach(b=>b.disabled=true);
   redraw(); updatePanel(); syncAnnot(); updateNameHint(); setStatus("Open a 5-minute vector ECG PDF to begin.");
 };
 
@@ -713,31 +724,28 @@ $("#btnClose").onclick=()=>{
 document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 $("#btnPvc").onclick=()=>applyTag("pvc");
 $("#btnPac").onclick=()=>applyTag("pac");
-$("#btnUda").onclick=()=>applyTag("uda");
 $("#btnFit").onclick=fitView;
+$("#btnRows").onclick=()=>{ S.showRows=!S.showRows; $("#btnRows").classList.toggle("on",S.showRows); redraw(); };
 
-/* ── Detection (manual: "Detect" → "Re-detect") ── */
+/* ── Detection (automatic: on load, and whenever the sensitivity slider moves) ── */
 let _sensT=null;
-function detectNow(record){
+function detectNow(){
   if(!S.voltage) return;
-  if(record) pushUndo();
   S.peakIdx=Array.from(new Set(C.detectPeaks(S.voltage,S.sensitivity))).sort((a,b)=>a-b);
   S.autoPeaks=new Set(S.peakIdx); S.manualRows={};
   if(S.selected!=null && !S.peakIdx.includes(S.selected)) S.selected=null;
-  S.hasDetected=true; $("#btnRedetect").textContent="Re-detect";
-  draw(); syncAnnot(); liveStatus();
-  setStatus(`Detected ${S.peakIdx.length} R-peaks (sensitivity ${S.sensitivity}). Review, edit, annotate, then Export.`, true);
+  draw(); syncAnnot();
+  setStatus(`Detected ${S.peakIdx.length} R-peaks (sensitivity ${S.sensitivity}).`, true);
 }
-$("#btnRedetect").onclick=()=>detectNow(true);
 $("#sensPanel").oninput=e=>{
   S.sensitivity=parseInt(e.target.value,10); $("#sensPanelVal").textContent=e.target.value;
-  if(S.voltage){ clearTimeout(_sensT); _sensT=setTimeout(()=>detectNow(false), 160); }   // live, debounced
+  if(S.voltage){ clearTimeout(_sensT); _sensT=setTimeout(detectNow, 160); }   // live, debounced re-detect
 };
 
 /* ── Export naming: <ID>_<YYYY_MM_DD> ── */
 function baseName(){
-  const id=(($("#fId").value||"").trim())||S.pdfName||"ecg";
-  const d=$("#fDate").value;                                    // YYYY-MM-DD from <input type=date>
+  const id=(($("#fId").value||"").trim())||"ZK-ECG000";        // placeholder is the default
+  const d=findDate($("#fDate").value);                          // normalise whatever was typed → YYYY-MM-DD
   return d ? `${id}_${d.replace(/-/g,"_")}` : id;
 }
 function updateNameHint(){ $("#nameHint").textContent = S.base ? (baseName()+".pdf / .xlsx") : ""; }
@@ -756,47 +764,16 @@ $("#btnSavePdf").onclick=()=>{
 
 /* ── Export .xlsx ── */
 $("#btnExport").onclick=()=>{
-  const rr=getRRexport(); if(!rr.length){ setStatus("No R-R intervals to export."); return; }
+  const rr=getRR(); if(!rr.length){ setStatus("No R-R intervals to export."); return; }
   const ann=getAnnotations();
   const aoa=[["Order","RR Interval (ms)","Annotation"]];
-  for(let i=0;i<rr.length;i++) aoa.push([i+1, rr[i]==null?null:Math.round(rr[i]*10)/10, ann[i]]);
+  for(let i=0;i<rr.length;i++) aoa.push([i+1, Math.round(rr[i]*10)/10, ann[i]]);
   const ws=XLSX.utils.aoa_to_sheet(aoa);
   ws["!cols"]=[{wch:7},{wch:16},{wch:26}];
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "RR Intervals");
   XLSX.writeFile(wb, baseName()+".xlsx");
   setStatus(`Exported ${rr.length} R-R intervals to ${baseName()}.xlsx`, true);
 };
-
-/* ── Settings modal ── */
-let kbListening=null;
-const modal=$("#settingsModal");
-$("#btnSettings").onclick=()=>{
-  $("#kbSelect").textContent=S.keys.select.toUpperCase();
-  $("#kbAdd").textContent=S.keys.add.toUpperCase();
-  $("#kbDel").textContent=S.keys.del.toUpperCase();
-  modal.hidden=false;
-};
-document.querySelectorAll(".keycap").forEach(cap=>{
-  cap.onclick=()=>{ document.querySelectorAll(".keycap").forEach(c=>c.classList.remove("listening"));
-    cap.classList.add("listening"); cap.textContent="press a key…"; kbListening=cap; };
-});
-window.addEventListener("keydown",e=>{
-  if(!kbListening) return;
-  e.preventDefault(); e.stopImmediatePropagation();   // don't let this keypress also fire a shortcut
-  const k=e.key.toLowerCase();
-  if(k.length===1 && /[a-z0-9]/.test(k)){ kbListening.textContent=k.toUpperCase(); kbListening.dataset.key=k; }
-  kbListening.classList.remove("listening"); kbListening=null;
-}, true);
-$("#setCancel").onclick=()=>{ kbListening=null; modal.hidden=true; };
-$("#setOk").onclick=()=>{
-  const sk=$("#kbSelect").dataset.key||S.keys.select, ak=$("#kbAdd").dataset.key||S.keys.add, dk=$("#kbDel").dataset.key||S.keys.del;
-  S.keys={select:sk, add:ak, del:dk};
-  document.querySelector('#modes [data-mode="select"] kbd').textContent=sk.toUpperCase();
-  document.querySelector('#modes [data-mode="add"] kbd').textContent=ak.toUpperCase();
-  document.querySelector('#modes [data-mode="delete"] kbd').textContent=dk.toUpperCase();
-  modal.hidden=true;   // keybindings only — sensitivity lives in the side panel, detection is manual
-};
-modal.addEventListener("click",e=>{ if(e.target===modal){ kbListening=null; modal.hidden=true; } });
 
 /* ── Boot ── */
 window.addEventListener("resize", resize);

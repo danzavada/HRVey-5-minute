@@ -18,10 +18,12 @@ validated to reproduce it to within the PDF format's floating-point floor (see
 1. **Open** a 5-minute ECG PDF. The ECG lives on **page 2** as thin vector strokes
    (14 stacked strips ≈ 22 s each).
 2. It renders page 2 and, in parallel, reads the raw vector paths, reconstructs the
-   continuous voltage signal, resamples it to 2000 Hz, and runs R-peak detection.
+   continuous voltage signal, resamples it to 2000 Hz, and **detects R-peaks automatically**.
 3. Peaks are drawn on the trace, colour-coded, with R-R interval labels when you zoom in.
-4. You **review and correct**: add missed peaks, delete false ones, annotate ectopics.
-5. **Export** the R-R intervals (ms) + annotations to an `.xlsx` file.
+4. **Tune** the detector with the **Sensitivity** slider (it re-detects live), and
+   **review/correct**: add missed peaks, delete false ones, annotate ectopics.
+5. Fill in the **Subject ID** (the recording date is read from the PDF), then **Export**
+   the R-R intervals (`.xlsx`) and/or the source PDF — named `ZK-ECG000_YYYY_MM_DD`.
 
 ### Beat colours
 
@@ -31,7 +33,6 @@ validated to reproduce it to within the PDF format's floating-point floor (see
 | 🔵 Blue | Long R-R (> 20 % above the median) |
 | 🟠 Orange | Short R-R (> 20 % below the median) |
 | 🔴 Red | PVC / PAC (manually tagged) |
-| ⚪ Gray | "Can't detect accurately" (manually tagged) |
 
 ---
 
@@ -55,14 +56,24 @@ ready-made synthetic example in [`EXAMPLE/`](EXAMPLE/) with its expected `.xlsx`
 | `S` | **Select** — click a beat to select it (then annotate) |
 | `A` | **Add peak** — click on a beat; snaps to the local max. `Shift+click` = exact |
 | `D` | **Delete peak** — click a peak to remove it |
-| `P` / `Q` / `U` | Tag the selected beat **PVC** / **PAC** / **can't-detect** (toggles) |
+| `P` / `Q` | Tag the selected beat **PVC** / **PAC** (toggles) |
 | `Delete` | Remove the selected peak |
-| `Ctrl+Z` | Undo |
-| `Z` | Fit page to window |
-| Drag | Pan · `Ctrl`+wheel | Zoom · wheel | Pan |
+| `Ctrl+Z` | Undo · `Z` Fit page to window |
+| Drag | Pan · `Ctrl`+wheel Zoom · wheel Pan |
 
-Mode keys and detection **sensitivity** (1–10) are configurable in **⚙ Settings**.
-Sensitivity re-runs detection; a higher value finds more (smaller) peaks.
+The **Sensitivity** slider (in the toolbar, next to *Fit*) re-runs detection live —
+higher finds more (smaller) peaks. Export lives in the right-hand panel:
+**Export .pdf** re-saves the source PDF and **Export .xlsx** writes the R-R table,
+both named `<Subject ID>_<YYYY_MM_DD>` (ID defaults to `ZK-ECG000`, date read from the PDF).
+
+### Row-detection check (debug)
+
+The extractor stitches the 14 strips into one signal by detecting the blank gaps
+between them. If a strip is malformed it can be missed, shifting the row assignment.
+The toolbar shows a **`N / 14 rows`** badge (red when a strip is missing) and a
+**Rows** toggle that draws a green baseline over every recognised strip — a blank
+band with no line is a strip the detector didn't pick up. The overlay turns on
+automatically whenever fewer than 14 rows are found.
 
 ---
 
