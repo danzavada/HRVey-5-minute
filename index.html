@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="description" content="HRVey 5-min — auto-detect R-peaks and export R-R intervals from 5-minute vector ECG PDFs. Runs entirely in your browser.">
+  <meta name="theme-color" content="#eef2f4">
+  <title>HRVey 5-min — R-peak detection for 5-minute ECG PDFs</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="icons/favicon-180.png">
+  <style>
+    :root{
+      --bg:#eef2f4; --panel:#ffffff; --panel2:#e7edf0; --line:#d3dde1;
+      --ink:#1f2b2f; --muted:#6e828a; --accent:#2bb1a6; --accent-d:#1f988f;
+      --btn:#eef3f5; --btn-h:#dfe9ec; --canvas-bg:#d8e2e6;
+      --green:#16a34a; --blue:#2563eb; --orange:#ea580c; --red:#dc2626; --gray:#94a3b8; --amber:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{font:14px/1.45 system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);
+      overflow:hidden;-webkit-user-select:none;user-select:none}
+    #app{display:flex;flex-direction:column;height:100vh}
+
+    /* Toolbar */
+    .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;
+      background:var(--panel);border-bottom:1px solid var(--line)}
+    .brand{display:flex;align-items:center;gap:9px;margin-right:6px}
+    .brand img{width:26px;height:26px;border-radius:6px;display:block}
+    .brand span{font-family:"Trebuchet MS",Verdana,"Segoe UI",system-ui,sans-serif;font-size:21px;font-weight:500;
+      letter-spacing:.3px;color:var(--ink);line-height:1}
+    .brand small{font-weight:600;color:var(--accent-d);font-size:11px;letter-spacing:.04em}
+    .sep{width:1px;align-self:stretch;background:var(--line);margin:2px 4px}
+    .spacer{flex:1}
+    button.btn{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:8px;
+      padding:7px 12px;cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s}
+    button.btn:hover{background:var(--btn-h)}
+    button.btn:active{transform:translateY(1px)}
+    button.btn:disabled{opacity:.4;cursor:not-allowed}
+    button.btn.primary{background:var(--accent-d);border-color:var(--accent-d);color:#fff;font-weight:600}
+    button.btn.primary:hover{background:var(--accent)}
+    .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+    .seg button{font:inherit;color:var(--muted);background:transparent;border:0;padding:7px 12px;cursor:pointer;
+      border-right:1px solid var(--line)}
+    .seg button:last-child{border-right:0}
+    .seg button:hover{background:var(--btn)}
+    .seg button:disabled{opacity:.4;cursor:not-allowed}
+    .seg button:disabled:hover{background:transparent}
+    .seg button.on{background:var(--accent-d);color:#fff;font-weight:600}
+    .seg button kbd{font:inherit;opacity:.6;margin-left:5px}
+    .seg.annot button.pvc.on,.seg.annot button.pac.on{background:var(--red);color:#fff;border-color:var(--red)}
+    .seg.annot button.uda.on{background:var(--gray);color:#fff;border-color:var(--gray)}
+    .tag{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+    /* Workspace */
+    .workspace{flex:1;display:flex;min-height:0}
+    .panel{flex:none;background:var(--panel);display:flex;flex-direction:column;min-height:0}
+    .panel-left{width:210px;border-right:1px solid var(--line)}
+    .panel-right{width:236px;border-left:1px solid var(--line)}
+    .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+      margin:0;padding:12px 14px 8px;font-weight:600;display:flex;justify-content:space-between}
+    .form{padding:2px 14px 14px;display:flex;flex-direction:column;overflow:auto}
+    .form label{font-size:11px;color:var(--muted);margin:12px 0 4px}
+    .form input[type=text],.form input[type=date]{font:inherit;color:var(--ink);background:#fff;
+      border:1px solid var(--line);border-radius:8px;padding:8px 9px;-webkit-user-select:text;user-select:text}
+    .form input:focus{outline:none;border-color:var(--accent)}
+    .form .sensrow{display:flex;align-items:center;gap:8px;margin-top:2px}
+    .form .sensrow input[type=range]{flex:1;accent-color:var(--accent-d)}
+    .form .sensrow .val{min-width:20px;text-align:center;font-weight:700}
+    .form .hint{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.4}
+    .form .filename{font-variant-numeric:tabular-nums;color:#2a363a;word-break:break-all}
+    .form button.save{margin-top:16px}
+    .rrlist{flex:1;overflow:auto;margin:0;padding:0 6px;list-style:none;min-height:60px}
+    .rrlist li{font-variant-numeric:tabular-nums;padding:4px 8px;border-radius:6px;font-size:13px;cursor:pointer;
+      display:flex;justify-content:space-between;align-items:center;color:#2a363a}
+    .rrlist li:nth-child(odd){background:rgba(0,0,0,.035)}
+    .rrlist li:hover{background:rgba(0,0,0,.07)}
+    .rrlist li.sel{background:rgba(43,177,166,.28);box-shadow:inset 2px 0 0 var(--accent-d)}
+    .rrlist li .i{color:var(--muted)}
+    .rrlist li.abn .v{font-weight:700}
+    .rrlist .empty{color:var(--muted);padding:8px;font-style:italic}
+    .stats{border-top:1px solid var(--line);padding:10px 14px;display:grid;grid-template-columns:auto 1fr;
+      gap:6px 10px;font-variant-numeric:tabular-nums}
+    .stats .k{color:var(--muted)}
+    .stats .v{text-align:right;font-weight:600}
+    .stats .v.big{color:var(--ink);font-size:15px}
+    .legend{border-top:1px solid var(--line);padding:8px 14px 12px;font-size:11px;color:var(--muted);
+      display:grid;grid-template-columns:1fr 1fr;gap:3px 8px}
+
+    .canvas-wrap{flex:1;position:relative;min-width:0;background:var(--canvas-bg)}
+    #ecg{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+    .canvas-wrap.empty::after{
+      content:"To begin, open a 5-minute vector ECG PDF (.pdf)\A Click here, drag & drop, or press Ctrl+O";
+      white-space:pre-line;line-height:1.7;position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      color:var(--muted);font-size:15px;pointer-events:none;padding:24px;text-align:center}
+    .canvas-wrap.empty{cursor:pointer}
+    .canvas-wrap.drag{outline:2px dashed var(--accent);outline-offset:-10px}
+    .zoombadge{position:absolute;left:10px;bottom:10px;background:rgba(255,255,255,.82);border:1px solid var(--line);
+      border-radius:6px;padding:3px 8px;font-size:12px;color:var(--muted);cursor:pointer}
+    .zoombadge:hover{color:var(--ink);border-color:var(--accent)}
+    .busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(216,226,230,.75);
+      color:var(--ink);font-size:15px;z-index:8}
+    .busy[hidden]{display:none}
+
+    /* Status bar */
+    .statusbar{display:flex;align-items:center;gap:10px;padding:6px 12px;background:var(--panel2);
+      border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);min-height:30px}
+    .statusbar .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+    .statusbar.ok .dot{background:var(--accent)}
+
+    /* Modal */
+    .backdrop{position:fixed;inset:0;background:rgba(18,28,32,.5);display:flex;align-items:center;justify-content:center;z-index:50}
+    .backdrop[hidden]{display:none}
+    .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px 16px;min-width:340px;
+      max-width:92vw;box-shadow:0 18px 60px rgba(15,30,35,.25)}
+    .modal h3{margin:0 0 4px;font-size:16px}
+    .modal p.sub{margin:0 0 14px;color:var(--muted);font-size:13px}
+    .modal .grp{margin:14px 0}
+    .modal label.lbl{display:block;font-size:12px;color:var(--muted);margin:0 0 6px}
+    .rangerow{display:flex;align-items:center;gap:10px}
+    .rangerow input[type=range]{flex:1;accent-color:var(--accent-d)}
+    .rangerow .val{min-width:22px;text-align:center;font-weight:700}
+    .keys{display:flex;gap:16px}
+    .keys .kb{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+    .keycap{display:inline-flex;align-items:center;justify-content:center;min-width:52px;height:38px;font:inherit;
+      font-weight:600;text-transform:uppercase;color:var(--ink);background:#fff;border:1px solid var(--line);
+      border-radius:8px;cursor:pointer;padding:0 12px}
+    .keycap:focus{outline:none;border-color:var(--accent);background:var(--panel2)}
+    .keycap.listening{border-color:var(--accent);color:var(--muted);font-weight:400;text-transform:none}
+    .modal .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+
+    /* Mobile gate */
+    #mobileGate{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
+      background:var(--bg);color:var(--ink);padding:28px;text-align:center}
+    #mobileGate[hidden]{display:none}
+    .gate-card{max-width:360px}
+    .gate-card img{width:120px;height:120px;border-radius:24px;display:block;margin:0 auto 18px}
+    .gate-card h1{margin:0 0 10px;font-family:"Trebuchet MS",Verdana,system-ui,sans-serif;font-weight:500;font-size:38px}
+    .gate-card p{margin:0;color:var(--muted);font-size:16px;line-height:1.5}
+  </style>
+</head>
+<body>
+<div id="mobileGate" hidden>
+  <div class="gate-card">
+    <img src="icons/icon-512.png" alt="HRVey">
+    <h1>HRVey 5-min</h1>
+    <p>This is a desktop tool. Please open it on a computer.</p>
+  </div>
+</div>
+
+<div id="app">
+  <header class="toolbar">
+    <span class="brand"><img src="icons/icon-192.png" alt=""><span>HRVey</span><small>5-MIN</small></span>
+    <button class="btn" id="btnOpen" title="Open ECG PDF (Ctrl+O)">Open PDF</button>
+    <button class="btn" id="btnClose" title="Close and return to start" disabled>Close</button>
+    <span class="sep"></span>
+    <span class="seg" id="modes">
+      <button data-mode="select" disabled>Select<kbd>S</kbd></button>
+      <button data-mode="add" disabled>Add peak<kbd>A</kbd></button>
+      <button data-mode="delete" disabled>Delete<kbd>D</kbd></button>
+    </span>
+    <span class="sep"></span>
+    <span class="seg annot" id="annot" title="Annotate the selected beat">
+      <button class="pvc" id="btnPvc" disabled>PVC<kbd>P</kbd></button>
+      <button class="pac" id="btnPac" disabled>PAC<kbd>Q</kbd></button>
+      <button class="uda" id="btnUda" disabled>Can't detect<kbd>U</kbd></button>
+    </span>
+    <span class="sep"></span>
+    <button class="btn" id="btnRedetect" title="Detect R-peaks at the current sensitivity" disabled>Detect</button>
+    <button class="btn" id="btnFit" title="Fit page to window (Z)" disabled>Fit</button>
+    <span class="spacer"></span>
+    <button class="btn primary" id="btnExport" title="Export R-R intervals to Excel" disabled>Export .xlsx</button>
+    <button class="btn" id="btnSettings" title="Settings">⚙</button>
+  </header>
+
+  <div class="workspace">
+    <aside class="panel panel-left">
+      <h2><span>R-R intervals</span><span id="rrCount"></span></h2>
+      <ul class="rrlist" id="rrlist"><li class="empty">No peaks yet</li></ul>
+      <div class="stats">
+        <span class="k">Heart rate</span><span class="v big" id="sHR">—</span>
+        <span class="k">Mean RR</span><span class="v" id="sMean">—</span>
+        <span class="k">RMSSD</span><span class="v" id="sRMSSD">—</span>
+        <span class="k">SDNN</span><span class="v" id="sSDNN">—</span>
+        <span class="k">Peaks</span><span class="v" id="sPeaks">0</span>
+      </div>
+      <div class="legend">
+        <span><i class="tag" style="background:var(--green)"></i>Normal</span>
+        <span><i class="tag" style="background:var(--blue)"></i>Long RR</span>
+        <span><i class="tag" style="background:var(--orange)"></i>Short RR</span>
+        <span><i class="tag" style="background:var(--red)"></i>PVC / PAC</span>
+        <span><i class="tag" style="background:var(--gray)"></i>Can't detect</span>
+      </div>
+    </aside>
+
+    <div class="canvas-wrap empty" id="wrap">
+      <canvas id="ecg"></canvas>
+      <div class="zoombadge" id="zoomBadge" title="Click to fit (100%)" style="display:none">100%</div>
+      <div class="busy" id="busy" hidden>Working…</div>
+    </div>
+
+    <aside class="panel panel-right">
+      <h2><span>Recording</span></h2>
+      <div class="form">
+        <label for="fId">Subject ID</label>
+        <input type="text" id="fId" value="ZK-ECG000" autocomplete="off" spellcheck="false">
+        <label for="fDate">Recording date</label>
+        <input type="date" id="fDate">
+        <label for="sensPanel">Detection sensitivity</label>
+        <div class="sensrow"><span>1</span><input type="range" id="sensPanel" min="1" max="10" step="1" value="5"><span>10</span><span class="val" id="sensPanelVal">5</span></div>
+        <div class="hint">Higher = more (smaller) peaks. Adjust to re-run the detector.</div>
+        <button class="btn save" id="btnSavePdf" disabled title="Save the opened PDF, named from the fields above">Save PDF as…</button>
+        <div class="hint filename" id="nameHint"></div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="statusbar" id="statusbar">
+    <span class="dot"></span>
+    <span id="status">Open a 5-minute vector ECG PDF — R-peaks are detected automatically.</span>
+  </footer>
+</div>
+
+<div class="backdrop" id="settingsModal" hidden>
+  <div class="modal">
+    <h3>Settings</h3>
+    <p class="sub">Keyboard shortcuts.</p>
+    <div class="grp">
+      <label class="lbl">Mode shortcuts (click a key, then press a new one)</label>
+      <div class="keys">
+        <div class="kb"><span class="lbl">Select</span><button class="keycap" id="kbSelect" data-act="select">S</button></div>
+        <div class="kb"><span class="lbl">Add peak</span><button class="keycap" id="kbAdd" data-act="add">A</button></div>
+        <div class="kb"><span class="lbl">Delete</span><button class="keycap" id="kbDel" data-act="del">D</button></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="setCancel">Cancel</button>
+      <button class="btn primary" id="setOk">Apply</button>
+    </div>
+  </div>
+</div>
+
+<input id="fileInput" type="file" accept=".pdf,application/pdf" hidden>
+
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="ecg-core.js"></script>
+<script>
+"use strict";
+(function(){
+const _ua = navigator.userAgent || "";
+const _isMobile =
+  (navigator.userAgentData && navigator.userAgentData.mobile === true) ||
+  /Android|iPhone|iPod|iPad|Mobile|Windows Phone|webOS|BlackBerry|IEMobile|Opera Mini/i.test(_ua) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+if(_isMobile){ document.getElementById("mobileGate").hidden = false; return; }
+
+const C = window.ECGCore;
+const { N_ROWS, FS, S_PER_PT, MV_PER_PT } = C;
+
+/* ── Constants ── */
+const RENDER_SCALE = 3;            // base-canvas px per PDF point
+const MIN_ZOOM = 0.05, MAX_ZOOM = 40;
+const LABEL_THRESHOLD_PTS = 250;   // show beat labels when view is narrower than this (points)
+const COL = { normal:"#16a34a", long:"#2563eb", short:"#ea580c", pvc:"#dc2626", pac:"#dc2626",
+              uda:"#94a3b8", sel:"#f59e0b", hover:"#ea580c" };
+
+if (location.protocol !== "file:") pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+
+/* ── State ── */
+const S = {
+  base:null, baseW:0, baseH:0, pageWpt:0, pageHpt:0,
+  meta:null, time:null, voltage:null, validRows:[],
+  peakIdx:[], autoPeaks:new Set(), manualRows:{}, tags:{},
+  history:[], selected:null,
+  peakImg:null,               // Float64 pairs, parallel to peakIdx (image space)
+  mode:"select", sensitivity:5, hasDetected:false, _loading:false,
+  keys:{select:"s", add:"a", del:"d"},
+  zoom:1, panX:0, panY:0, fitZoom:MIN_ZOOM,
+  pdfName:"ecg", pdfBytes:null,
+  hover:null, cursor:null,
+};
+
+/* ── DOM ── */
+const $ = s => document.querySelector(s);
+const canvas = $("#ecg"), ctx = canvas.getContext("2d");
+const wrap = $("#wrap"), zoomBadge = $("#zoomBadge"), busy = $("#busy");
+let cssW = 0, cssH = 0, dpr = 1;
+
+/* ── View transform ── */
+function i2c(ix, iy){ return [ix*S.zoom + S.panX, iy*S.zoom + S.panY]; }
+function c2i(cx, cy){ return [(cx-S.panX)/S.zoom, (cy-S.panY)/S.zoom]; }
+function evPos(e){ const r = canvas.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
+function clampPan(){
+  if(!S.base) return;
+  const w=S.baseW*S.zoom, h=S.baseH*S.zoom, m=60;
+  S.panX = Math.min(cssW-m, Math.max(m-w, S.panX));
+  S.panY = Math.min(cssH-m, Math.max(m-h, S.panY));
+}
+function computeFit(){ return S.base ? Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(cssW/S.baseW, cssH/S.baseH)*0.98)) : MIN_ZOOM; }
+function fitView(){ if(!S.base) return; S.fitZoom=computeFit(); S.zoom=S.fitZoom;
+  S.panX=(cssW-S.baseW*S.zoom)/2; S.panY=(cssH-S.baseH*S.zoom)/2; redraw(); }
+function zoomAt(cx, cy, z){ const nz=Math.max(S.fitZoom, Math.min(MAX_ZOOM, z));
+  const [ix,iy]=c2i(cx,cy); S.zoom=nz; S.panX=cx-ix*nz; S.panY=cy-iy*nz; clampPan(); redraw(); }
+function viewWidthPts(){ return (cssW/S.zoom)/RENDER_SCALE; }
+
+/* ── Peak geometry (mirrors _peak_pdf_pos / _row_from_pos) ── */
+function rowFromCumT(t){
+  const cum = S.meta.cum_t; let r = 0;
+  for(let ri=0; ri<cum.length; ri++){ if(cum[ri] > cum[r] && cum[ri] <= t) r = ri; }
+  return r;
+}
+function peakPointPos(idx){
+  const m = S.meta, t = S.time[idx], v = S.voltage[idx];
+  const r = (idx in S.manualRows) ? S.manualRows[idx] : rowFromCumT(t);
+  const x = m.x_left + (t - m.cum_t[r]) / S_PER_PT;
+  const y = m.baseline_y[r] - v / MV_PER_PT;
+  return [x, y];
+}
+function peakImgPos(idx){ const [x,y] = peakPointPos(idx); return [x*RENDER_SCALE, y*RENDER_SCALE]; }
+function rowFromPageY(py){
+  let best = S.validRows[0], bd = Infinity;
+  for(const r of S.validRows){ const d = Math.abs(S.meta.baseline_y[r] - py); if(d < bd){ bd = d; best = r; } }
+  return best;
+}
+function nearestPeakListIdx(ix, iy){
+  if(!S.peakIdx.length || !S.peakImg) return -1;
+  let bi=-1, bd=Infinity;
+  for(let i=0;i<S.peakIdx.length;i++){ const dx=S.peakImg[2*i]-ix, dy=S.peakImg[2*i+1]-iy; const d=dx*dx+dy*dy; if(d<bd){bd=d;bi=i;} }
+  return bi;
+}
+
+/* ── History ── */
+function snapshot(){ return { peakIdx:S.peakIdx.slice(), autoPeaks:new Set(S.autoPeaks),
+  tags:Object.assign({},S.tags), manualRows:Object.assign({},S.manualRows) }; }
+function pushUndo(){ S.history.push(snapshot()); if(S.history.length>200) S.history.shift(); }
+function undo(){ if(!S.history.length) return; const h=S.history.pop();
+  S.peakIdx=h.peakIdx; S.autoPeaks=h.autoPeaks; S.tags=h.tags; S.manualRows=h.manualRows;
+  if(S.selected!=null && !S.peakIdx.includes(S.selected)) S.selected=null;
+  draw(); syncAnnot(); setStatus("Undone."); }
+
+/* ── Peak editing (mirrors add/del) ── */
+function addPeak(tc, exact, row){
+  const n=S.time.length;
+  let ci=C.searchsortedLeft(S.time, tc); ci=Math.min(Math.max(ci,0),n-1);
+  let best;
+  if(exact){ best=ci; }
+  else{
+    const w=Math.floor(0.2*FS); let lo=Math.max(0,ci-w), hi=Math.min(n-1,ci+w);
+    if(row!=null){
+      const cum=S.meta.cum_t; const tLo=cum[row]; let tHi=S.time[n-1];
+      for(let ri=row+1; ri<cum.length; ri++){ if(cum[ri]>cum[row]){ tHi=cum[ri]; break; } }
+      const rowLo=C.searchsortedLeft(S.time, tLo), rowHi=Math.min(C.searchsortedLeft(S.time, tHi), n-1);
+      lo=Math.max(lo, rowLo); hi=Math.min(hi, rowHi);
+      // margin misclick: ±0.2s window fell outside the strip → snap into it (Python would argmax an empty slice)
+      if(hi<lo){ lo=hi=Math.min(Math.max(ci, rowLo), rowHi); }
+    } else if(hi<lo) hi=lo;
+    best=lo; let bv=S.voltage[lo];
+    for(let i=lo+1;i<=hi;i++){ if(S.voltage[i]>bv){ bv=S.voltage[i]; best=i; } }
+  }
+  if(!S.peakIdx.includes(best)){ S.peakIdx.push(best); S.peakIdx.sort((a,b)=>a-b); }
+  if(row!=null) S.manualRows[best]=row;
+  draw();
+}
+function delByPos(ix, iy){
+  const ni=nearestPeakListIdx(ix,iy); if(ni<0) return;
+  const removed=S.peakIdx.splice(ni,1)[0];
+  S.autoPeaks.delete(removed); delete S.manualRows[removed];
+  if(removed===S.selected){ S.selected=null; syncAnnot(); }
+  draw();
+}
+function applyTag(tag){
+  if(S.selected==null) return;
+  pushUndo();
+  if(tag==null || S.tags[S.selected]===tag) delete S.tags[S.selected];
+  else S.tags[S.selected]=tag;
+  draw(); syncAnnot();
+}
+
+/* ── Rendering ── */
+function resize(){
+  dpr = window.devicePixelRatio || 1;
+  const r = wrap.getBoundingClientRect(); cssW=r.width; cssH=r.height;
+  canvas.width=Math.max(1,Math.round(cssW*dpr)); canvas.height=Math.max(1,Math.round(cssH*dpr));
+  if(S.base){ S.fitZoom=computeFit(); if(S.zoom<S.fitZoom) S.zoom=S.fitZoom; clampPan(); }
+  redraw();
+}
+function uiScale(){ return Math.min(2.2, Math.max(0.7, Math.pow(S.zoom/Math.max(S.fitZoom,1e-3), 0.4))); }
+
+function redraw(){
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,cssW,cssH);
+  if(!S.base){ zoomBadge.style.display="none"; return; }
+  ctx.imageSmoothingEnabled = S.zoom < 1.6;
+  ctx.setTransform(dpr*S.zoom,0,0,dpr*S.zoom, dpr*S.panX, dpr*S.panY);
+  ctx.drawImage(S.base,0,0);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  drawOverlay();
+  zoomBadge.style.display="block";
+  zoomBadge.textContent = Math.round(S.zoom/Math.max(S.fitZoom,1e-9)*100)+"%";
+}
+function peakColor(idx, cls){
+  const tag=S.tags[idx];
+  if(tag==="pvc"||tag==="pac") return COL.pvc;
+  if(tag==="uda") return COL.uda;
+  if(cls.long.has(idx)) return COL.long;
+  if(cls.short.has(idx)) return COL.short;
+  return COL.normal;
+}
+function drawOverlay(){
+  // rebuild cached image positions
+  const n=S.peakIdx.length;
+  S.peakImg = new Float64Array(n*2);
+  for(let i=0;i<n;i++){ const p=peakImgPos(S.peakIdx[i]); S.peakImg[2*i]=p[0]; S.peakImg[2*i+1]=p[1]; }
+  if(!n){ return; }
+  const cls = C.classifyBeats(S.time, S.peakIdx);
+  const s=uiScale(), R=Math.max(3.2,5*s), lw=Math.max(1.4,1.8*s);
+  const showLabels = viewWidthPts() < LABEL_THRESHOLD_PTS;
+
+  // RR labels (need previous peak); draw first so markers sit on top
+  if(showLabels){
+    ctx.font = "600 "+Math.max(10,12*s)+"px system-ui, sans-serif";
+    ctx.textAlign="center"; ctx.textBaseline="alphabetic";
+    for(let i=0;i<n;i++){
+      const [x,y]=i2c(S.peakImg[2*i], S.peakImg[2*i+1]);
+      const col=peakColor(S.peakIdx[i], cls);
+      let txt="Beat "+(i+1);
+      if(i>0){ const rr=(S.time[S.peakIdx[i]]-S.time[S.peakIdx[i-1]])*1000; txt="B"+(i+1)+"  ←"+rr.toFixed(0)+"ms"; }
+      const ty=y-R-8*s;
+      ctx.lineWidth=3; ctx.strokeStyle="rgba(255,255,255,.9)"; ctx.strokeText(txt,x,ty);
+      ctx.fillStyle=col; ctx.fillText(txt,x,ty);
+    }
+  }
+  // markers
+  for(let i=0;i<n;i++){
+    const [x,y]=i2c(S.peakImg[2*i], S.peakImg[2*i+1]);
+    const col=peakColor(S.peakIdx[i], cls);
+    ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.fillStyle=col+"cc"; ctx.fill();
+    ctx.lineWidth=lw; ctx.strokeStyle=col; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,1.3*s+0.6,0,7); ctx.fillStyle="#fff"; ctx.fill();
+  }
+  // hover highlight
+  if(S.hover){ const [x,y]=i2c(S.hover[0],S.hover[1]);
+    ctx.beginPath(); ctx.arc(x,y,R+5*s,0,7); ctx.strokeStyle=COL.hover; ctx.lineWidth=Math.max(1.5,2*s); ctx.stroke(); }
+  // add-mode cursor ring (~0.2s radius in points → image px)
+  if(S.cursor && S.mode==="add"){ const [x,y]=i2c(S.cursor[0],S.cursor[1]);
+    const rr=(0.2/S_PER_PT)*RENDER_SCALE*S.zoom;
+    ctx.beginPath(); ctx.arc(x,y,rr,0,7); ctx.strokeStyle=COL.normal; ctx.lineWidth=1.5; ctx.stroke(); }
+  // selection ring
+  if(S.selected!=null){
+    const li=S.peakIdx.indexOf(S.selected);
+    if(li>=0){ const [x,y]=i2c(S.peakImg[2*li],S.peakImg[2*li+1]);
+      ctx.beginPath(); ctx.arc(x,y,R+4*s,0,7); ctx.strokeStyle=COL.sel; ctx.lineWidth=Math.max(2,2.5*s); ctx.stroke(); }
+  }
+}
+function draw(){ redraw(); updatePanel(); }
+
+/* ── Panel / status ── */
+function fmt1(x){ return (Math.round(x*10)/10).toFixed(1); }
+function rrArray(){ // ms diffs across all peaks (no uda filtering) for stats
+  const out=[]; for(let i=1;i<S.peakIdx.length;i++) out.push((S.time[S.peakIdx[i]]-S.time[S.peakIdx[i-1]])*1000);
+  return out;
+}
+function getRRexport(){ // mirror get_rr_ms: null when either endpoint is uda
+  const out=[];
+  for(let i=1;i<S.peakIdx.length;i++){
+    const a=S.peakIdx[i-1], b=S.peakIdx[i];
+    out.push((S.tags[a]==="uda"||S.tags[b]==="uda") ? null : (S.time[b]-S.time[a])*1000);
+  }
+  return out;
+}
+function getAnnotations(){ // mirror get_annotations
+  const out=[];
+  for(let i=1;i<S.peakIdx.length;i++){
+    const a=S.peakIdx[i-1], b=S.peakIdx[i];
+    if(S.tags[a]==="uda"||S.tags[b]==="uda") out.push("Unable to detect accurately");
+    else { const t=S.tags[b]; out.push(t ? t.toUpperCase() : "Normal"); }
+  }
+  return out;
+}
+function updatePanel(){
+  const list=$("#rrlist"); list.innerHTML="";
+  const rrExp=getRRexport();
+  $("#rrCount").textContent = rrExp.length ? rrExp.length+"" : "";
+  if(!rrExp.length){
+    const li=document.createElement("li"); li.className="empty";
+    li.textContent = S.peakIdx.length ? "Need ≥2 peaks" : "No peaks yet";
+    list.appendChild(li);
+  } else {
+    const cls=C.classifyBeats(S.time,S.peakIdx);
+    for(let i=0;i<rrExp.length;i++){
+      const beat=S.peakIdx[i+1];
+      const li=document.createElement("li");
+      if(beat===S.selected) li.classList.add("sel");
+      const col=peakColor(beat,cls);
+      if(cls.long.has(beat)||cls.short.has(beat)||S.tags[beat]) li.classList.add("abn");
+      const ms=rrExp[i];
+      li.innerHTML=`<span class="i"><i class="tag" style="background:${col}"></i>RR${String(i+1).padStart(2,"0")}</span>`+
+        `<span class="v">${ms==null?"—":Math.round(ms)+" ms"}</span>`;
+      li.onclick=()=>{ focusPeak(beat); };
+      list.appendChild(li);
+    }
+  }
+  // stats
+  const all=rrArray();
+  if(all.length){
+    const valid=getRRexport().filter(v=>v!=null);
+    const mean=all.reduce((a,b)=>a+b,0)/all.length;
+    $("#sHR").textContent=fmt1(60000/mean)+" bpm";
+    $("#sMean").textContent=Math.round(mean)+" ms";
+    const hv=(valid.length>=2)?hrv(valid):{rmssd:null,sdnn:null};
+    $("#sRMSSD").textContent=hv.rmssd==null?"—":fmt1(hv.rmssd)+" ms";
+    $("#sSDNN").textContent=hv.sdnn==null?"—":fmt1(hv.sdnn)+" ms";
+  } else { $("#sHR").textContent=$("#sMean").textContent=$("#sRMSSD").textContent=$("#sSDNN").textContent="—"; }
+  $("#sPeaks").textContent=String(S.peakIdx.length);
+  $("#btnExport").disabled = rrExp.length===0;
+}
+function hrv(vals){
+  const n=vals.length, mean=vals.reduce((a,b)=>a+b,0)/n;
+  const sdnn=Math.sqrt(vals.reduce((a,v)=>a+(v-mean)*(v-mean),0)/n);
+  let s=0; for(let i=0;i<n-1;i++){ const d=vals[i+1]-vals[i]; s+=d*d; }
+  return { rmssd:Math.sqrt(s/(n-1)), sdnn };
+}
+function focusPeak(beat){
+  S.selected = (S.selected===beat) ? null : beat;
+  if(S.selected!=null){
+    const [ix,iy]=peakImgPos(beat);
+    S.panX = cssW/2 - ix*S.zoom; S.panY = cssH/2 - iy*S.zoom; clampPan();
+  }
+  draw(); syncAnnot();
+}
+function setStatus(msg, ok){ $("#status").textContent=msg; $("#statusbar").classList.toggle("ok",!!ok); }
+function liveStatus(){
+  const n=S.peakIdx.length;
+  if(n<2){ setStatus(`${n} peak${n===1?"":"s"} — add or delete peaks, then Export.`, n>0); return; }
+  const all=rrArray(); const mean=all.reduce((a,b)=>a+b,0)/all.length;
+  setStatus(`${n} peaks  ·  mean RR ${mean.toFixed(0)} ms  ·  HR ${(60000/mean).toFixed(0)} bpm  ·  select a beat to annotate (P / Q / U)`, true);
+}
+
+/* ── Modes / annotate button sync ── */
+function setMode(m){
+  S.mode=m;
+  document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
+  if(m!=="add") S.cursor=null;
+  const hint={ select:"Select: click a beat to select it, then annotate (P PVC · Q PAC · U can't-detect). Drag to pan, Ctrl+wheel to zoom.",
+    add:"Add: click on a beat to place an R-peak (snaps to the local max). Shift+click places exactly at the cursor.",
+    delete:"Delete: click a peak to remove it." }[m];
+  if(hint && S.base) setStatus(hint); redraw();
+}
+function syncAnnot(){
+  const has=S.selected!=null;
+  const tag=has?S.tags[S.selected]:null;
+  $("#btnPvc").disabled=!has; $("#btnPac").disabled=!has; $("#btnUda").disabled=!has;
+  $("#btnPvc").classList.toggle("on",tag==="pvc");
+  $("#btnPac").classList.toggle("on",tag==="pac");
+  $("#btnUda").classList.toggle("on",tag==="uda");
+  updatePanel();
+}
+
+/* ── Mouse ── */
+let drag=null, suppressClick=false;
+canvas.addEventListener("mousedown",e=>{ if(!S.base||e.button!==0) return; suppressClick=false; drag={x:e.clientX,y:e.clientY,moved:false}; });
+window.addEventListener("mousemove",e=>{
+  if(drag){
+    const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+    if(!drag.moved && Math.hypot(dx,dy)<4) return;
+    drag.moved=true; S.panX+=dx; S.panY+=dy; drag.x=e.clientX; drag.y=e.clientY; clampPan(); redraw(); return;
+  }
+});
+window.addEventListener("mouseup",()=>{ if(drag){ if(drag.moved) suppressClick=true; drag=null; } });
+canvas.addEventListener("mousemove",e=>{
+  if(drag||!S.base) return;
+  const [cx,cy]=evPos(e), [ix,iy]=c2i(cx,cy);
+  if(S.mode==="add"){
+    // shift = exact placement: desktop shows no ring/highlight at all
+    S.cursor = e.shiftKey ? null : [ix,iy]; S.hover=null; redraw();
+  } else {
+    S.cursor=null;
+    const ni=nearestPeakListIdx(ix,iy);
+    S.hover = ni>=0 ? [S.peakImg[2*ni], S.peakImg[2*ni+1]] : null;
+    redraw();
+  }
+});
+canvas.addEventListener("mouseleave",()=>{ S.hover=null; S.cursor=null; redraw(); });
+canvas.addEventListener("click",e=>{
+  if(suppressClick){ suppressClick=false; return; }
+  if(!S.base) return;
+  const [cx,cy]=evPos(e), [ix,iy]=c2i(cx,cy);
+  if(S.mode==="select"){
+    const ni=nearestPeakListIdx(ix,iy);
+    let sel = ni>=0 ? S.peakIdx[ni] : null;
+    if(sel===S.selected) sel=null;
+    S.selected=sel; syncAnnot(); redraw(); return;
+  }
+  if(S.mode==="add"){
+    pushUndo();
+    const py=iy/RENDER_SCALE, px=ix/RENDER_SCALE;
+    const r=rowFromPageY(py);
+    const tc=S.meta.cum_t[r] + (px - S.meta.x_left)*S_PER_PT;
+    if(tc<0 || tc>S.time[S.time.length-1]){ S.history.pop(); return; }
+    addPeak(tc, e.shiftKey, r); liveStatus();
+  } else if(S.mode==="delete"){
+    pushUndo(); delByPos(ix,iy); liveStatus();
+  }
+});
+canvas.addEventListener("wheel",e=>{
+  if(!S.base) return; e.preventDefault();
+  if(e.ctrlKey){ const [cx,cy]=evPos(e); const k=e.deltaY>0?0.0024:0.0036; zoomAt(cx,cy,S.zoom*Math.exp(-e.deltaY*k)); return; }
+  let dx=e.deltaX, dy=e.deltaY;
+  if(e.shiftKey){ dx+=dy; dy=0; }
+  S.panX-=dx; S.panY-=dy; clampPan(); redraw();
+},{passive:false});
+zoomBadge.onclick=fitView;
+
+/* ── Keyboard ── */
+window.addEventListener("keydown",e=>{
+  if(kbListening) return;                          // capture handled by settings
+  const k=e.key.toLowerCase();
+  if((e.ctrlKey||e.metaKey) && k==="z"){ e.preventDefault(); undo(); return; }
+  if((e.ctrlKey||e.metaKey) && k==="o"){ e.preventDefault(); openPicker(); return; }
+  if(e.ctrlKey||e.metaKey||e.altKey) return;
+  if(!S.base) return;
+  if(k===S.keys.select) setMode("select");
+  else if(k===S.keys.add) setMode("add");
+  else if(k===S.keys.del) setMode("delete");
+  else if(k==="z") fitView();
+  else if(k==="p"){ if(S.selected!=null) applyTag("pvc"); }
+  else if(k==="q"){ if(S.selected!=null) applyTag("pac"); }
+  else if(k==="u"){ if(S.selected!=null) applyTag("uda"); }
+  else if(k==="delete"||k==="backspace"){ if(S.selected!=null){ pushUndo();
+    const li=S.peakIdx.indexOf(S.selected); if(li>=0){ S.peakIdx.splice(li,1); S.autoPeaks.delete(S.selected); delete S.manualRows[S.selected]; }
+    S.selected=null; draw(); syncAnnot(); liveStatus(); } }
+});
+
+/* ── File open ── */
+function openPicker(){ $("#fileInput").click(); }
+$("#btnOpen").onclick=openPicker;
+$("#fileInput").onchange=e=>{ const f=e.target.files[0]; if(f) openPdfFile(f); e.target.value=""; };
+wrap.addEventListener("click",()=>{ if(!S.base) openPicker(); });
+wrap.addEventListener("dragover",e=>{ e.preventDefault(); wrap.classList.add("drag"); });
+wrap.addEventListener("dragleave",()=>wrap.classList.remove("drag"));
+wrap.addEventListener("drop",e=>{ e.preventDefault(); wrap.classList.remove("drag");
+  const f=e.dataTransfer.files[0]; if(f && /\.pdf$/i.test(f.name)) openPdfFile(f); });
+
+const wait = () => new Promise(r=>setTimeout(r, 0));   // let the status paint between heavy steps
+function pad2(x){ return String(x).padStart(2,"0"); }
+function findDate(s){
+  if(!s) return "";
+  let m=/(\d{4})[-_.\/](\d{1,2})[-_.\/](\d{1,2})/.exec(s);      // YYYY-MM-DD
+  if(m && +m[2]>=1 && +m[2]<=12 && +m[3]>=1 && +m[3]<=31) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+  m=/(\d{1,2})[-_.\/](\d{1,2})[-_.\/](\d{4})/.exec(s);          // DD-MM-YYYY
+  if(m && +m[2]>=1 && +m[2]<=12 && +m[1]>=1 && +m[1]<=31) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+  return "";
+}
+async function extractRecordingDate(pdf, filename){
+  try{ const md=await pdf.getMetadata(); const cd=md&&md.info&&(md.info.CreationDate||md.info.ModDate);
+    const m=cd&&/D:(\d{4})(\d{2})(\d{2})/.exec(cd); if(m) return `${m[1]}-${m[2]}-${m[3]}`; }catch(e){}
+  for(const pno of [1,2]){                                       // scan cover then ECG page text
+    try{ const pg=await pdf.getPage(pno); const tc=await pg.getTextContent();
+      const d=findDate(tc.items.map(i=>i.str).join(" ")); if(d) return d; }catch(e){}
+  }
+  return findDate(filename);
+}
+async function openPdfFile(file){
+  if(S._loading) return; S._loading=true; $("#btnOpen").disabled=true;
+  busy.hidden=false; busy.textContent="Reading PDF…"; setStatus("Reading PDF…");
+  try{
+    const buf=await file.arrayBuffer();
+    const bytes=new Uint8Array(buf);
+    S.pdfBytes=bytes.slice();                                   // pristine copy for "Save PDF"
+    const pdf=await pdfjsLib.getDocument({data:bytes.slice()}).promise;
+    if(pdf.numPages<2){ throw new Error("This tool expects a 2-page vector ECG PDF (the signal is on page 2)."); }
+    const page=await pdf.getPage(2);
+
+    busy.textContent="Rendering page…"; await wait();
+    const vpR=page.getViewport({scale:RENDER_SCALE});
+    const base=document.createElement("canvas"); base.width=Math.round(vpR.width); base.height=Math.round(vpR.height);
+    await page.render({canvasContext:base.getContext("2d"), viewport:vpR}).promise;
+
+    busy.textContent="Extracting signal…"; await wait();
+    const vp1=page.getViewport({scale:1});
+    const ol=await page.getOperatorList();
+    const meta=C.extractEcg(C.extractStrokePaths(ol.fnArray, ol.argsArray, vp1.transform, pdfjsLib.OPS));
+    if(!meta.voltage.length){ throw new Error("No ECG vector traces found on page 2 (expected thin 0.4–0.8 pt strokes)."); }
+    const recDate=await extractRecordingDate(pdf, file.name);
+
+    // commit state — peaks are NOT auto-detected; the user sets sensitivity and clicks Detect
+    S.base=base; S.baseW=base.width; S.baseH=base.height;
+    S.pageWpt=base.width/RENDER_SCALE; S.pageHpt=base.height/RENDER_SCALE;
+    S.meta=meta; S.time=meta.time; S.voltage=meta.voltage;
+    const rset=new Set(); for(const r of meta.raw_r) rset.add(r); S.validRows=Array.from(rset).sort((a,b)=>a-b);
+    S.peakIdx=[]; S.autoPeaks=new Set(); S.manualRows={}; S.tags={}; S.history=[]; S.selected=null; S.hasDetected=false;
+    S.pdfName=file.name.replace(/\.pdf$/i,"");
+    if(recDate) $("#fDate").value=recDate;
+    $("#btnRedetect").textContent="Detect"; $("#btnSavePdf").disabled=false;
+    document.querySelectorAll(".toolbar button").forEach(b=>{ if(b.id!=="btnSettings"&&b.id!=="btnOpen") b.disabled=false; });
+    document.querySelectorAll("#modes button").forEach(b=>b.disabled=false);
+    wrap.classList.remove("empty");
+    setMode("select"); fitView(); draw(); syncAnnot(); updateNameHint();
+    setStatus(`Loaded "${S.pdfName}"${recDate?` (recorded ${recDate})`:""} — set the sensitivity and click Detect.`, true);
+  }catch(err){ console.error(err); setStatus("Error: "+(err&&err.message||err)); }
+  finally{ busy.hidden=true; $("#btnOpen").disabled=false; S._loading=false; }
+}
+$("#btnClose").onclick=()=>{
+  S.base=null; S.meta=null; S.voltage=null; S.peakIdx=[]; S.selected=null; S.history=[]; S.hasDetected=false; S.pdfBytes=null;
+  wrap.classList.add("empty");
+  $("#btnRedetect").textContent="Detect"; $("#btnSavePdf").disabled=true; $("#fDate").value="";
+  document.querySelectorAll(".toolbar button").forEach(b=>{ if(b.id!=="btnOpen"&&b.id!=="btnSettings") b.disabled=true; });
+  redraw(); updatePanel(); syncAnnot(); updateNameHint(); setStatus("Open a 5-minute vector ECG PDF to begin.");
+};
+
+/* ── Toolbar wiring ── */
+document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+$("#btnPvc").onclick=()=>applyTag("pvc");
+$("#btnPac").onclick=()=>applyTag("pac");
+$("#btnUda").onclick=()=>applyTag("uda");
+$("#btnFit").onclick=fitView;
+
+/* ── Detection (manual: "Detect" → "Re-detect") ── */
+let _sensT=null;
+function detectNow(record){
+  if(!S.voltage) return;
+  if(record) pushUndo();
+  S.peakIdx=Array.from(new Set(C.detectPeaks(S.voltage,S.sensitivity))).sort((a,b)=>a-b);
+  S.autoPeaks=new Set(S.peakIdx); S.manualRows={};
+  if(S.selected!=null && !S.peakIdx.includes(S.selected)) S.selected=null;
+  S.hasDetected=true; $("#btnRedetect").textContent="Re-detect";
+  draw(); syncAnnot(); liveStatus();
+  setStatus(`Detected ${S.peakIdx.length} R-peaks (sensitivity ${S.sensitivity}). Review, edit, annotate, then Export.`, true);
+}
+$("#btnRedetect").onclick=()=>detectNow(true);
+$("#sensPanel").oninput=e=>{
+  S.sensitivity=parseInt(e.target.value,10); $("#sensPanelVal").textContent=e.target.value;
+  if(S.voltage){ clearTimeout(_sensT); _sensT=setTimeout(()=>detectNow(false), 160); }   // live, debounced
+};
+
+/* ── Export naming: <ID>_<YYYY_MM_DD> ── */
+function baseName(){
+  const id=(($("#fId").value||"").trim())||S.pdfName||"ecg";
+  const d=$("#fDate").value;                                    // YYYY-MM-DD from <input type=date>
+  return d ? `${id}_${d.replace(/-/g,"_")}` : id;
+}
+function updateNameHint(){ $("#nameHint").textContent = S.base ? (baseName()+".pdf / .xlsx") : ""; }
+$("#fId").oninput=updateNameHint;
+$("#fDate").oninput=updateNameHint;
+
+$("#btnSavePdf").onclick=()=>{
+  if(!S.pdfBytes) return;
+  const blob=new Blob([S.pdfBytes],{type:"application/pdf"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=baseName()+".pdf";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  setStatus(`Saved PDF as ${baseName()}.pdf`, true);
+};
+
+/* ── Export .xlsx ── */
+$("#btnExport").onclick=()=>{
+  const rr=getRRexport(); if(!rr.length){ setStatus("No R-R intervals to export."); return; }
+  const ann=getAnnotations();
+  const aoa=[["Order","RR Interval (ms)","Annotation"]];
+  for(let i=0;i<rr.length;i++) aoa.push([i+1, rr[i]==null?null:Math.round(rr[i]*10)/10, ann[i]]);
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"]=[{wch:7},{wch:16},{wch:26}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "RR Intervals");
+  XLSX.writeFile(wb, baseName()+".xlsx");
+  setStatus(`Exported ${rr.length} R-R intervals to ${baseName()}.xlsx`, true);
+};
+
+/* ── Settings modal ── */
+let kbListening=null;
+const modal=$("#settingsModal");
+$("#btnSettings").onclick=()=>{
+  $("#kbSelect").textContent=S.keys.select.toUpperCase();
+  $("#kbAdd").textContent=S.keys.add.toUpperCase();
+  $("#kbDel").textContent=S.keys.del.toUpperCase();
+  modal.hidden=false;
+};
+document.querySelectorAll(".keycap").forEach(cap=>{
+  cap.onclick=()=>{ document.querySelectorAll(".keycap").forEach(c=>c.classList.remove("listening"));
+    cap.classList.add("listening"); cap.textContent="press a key…"; kbListening=cap; };
+});
+window.addEventListener("keydown",e=>{
+  if(!kbListening) return;
+  e.preventDefault(); e.stopImmediatePropagation();   // don't let this keypress also fire a shortcut
+  const k=e.key.toLowerCase();
+  if(k.length===1 && /[a-z0-9]/.test(k)){ kbListening.textContent=k.toUpperCase(); kbListening.dataset.key=k; }
+  kbListening.classList.remove("listening"); kbListening=null;
+}, true);
+$("#setCancel").onclick=()=>{ kbListening=null; modal.hidden=true; };
+$("#setOk").onclick=()=>{
+  const sk=$("#kbSelect").dataset.key||S.keys.select, ak=$("#kbAdd").dataset.key||S.keys.add, dk=$("#kbDel").dataset.key||S.keys.del;
+  S.keys={select:sk, add:ak, del:dk};
+  document.querySelector('#modes [data-mode="select"] kbd').textContent=sk.toUpperCase();
+  document.querySelector('#modes [data-mode="add"] kbd').textContent=ak.toUpperCase();
+  document.querySelector('#modes [data-mode="delete"] kbd').textContent=dk.toUpperCase();
+  modal.hidden=true;   // keybindings only — sensitivity lives in the side panel, detection is manual
+};
+modal.addEventListener("click",e=>{ if(e.target===modal){ kbListening=null; modal.hidden=true; } });
+
+/* ── Boot ── */
+window.addEventListener("resize", resize);
+resize();
+if("serviceWorker" in navigator && location.protocol!=="file:"){
+  window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+})();
+</script>
+</body>
+</html>

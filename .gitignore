@@ -1,0 +1,12 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+
+# Node (none committed, but just in case)
+node_modules/
+npm-debug.log*
+
+# Local scratch
+*.tmp

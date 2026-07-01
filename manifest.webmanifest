@@ -1,0 +1,17 @@
+{
+  "name": "HRVey 5-min — R-peak detection for 5-minute ECG PDFs",
+  "short_name": "HRVey 5-min",
+  "description": "Auto-detect R-peaks and export R-R intervals from vector 5-minute ECG PDFs, entirely in your browser.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef2f4",
+  "theme_color": "#eef2f4",
+  "categories": ["medical", "health", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
