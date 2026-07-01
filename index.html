@@ -49,6 +49,8 @@
     button.btn.primary{background:var(--accent-d);border-color:var(--accent-d);color:#fff;font-weight:600}
     button.btn.primary:hover{background:var(--accent)}
     button.btn.on{background:var(--accent-d);border-color:var(--accent-d);color:#fff}
+    button.btn.pdf{background:#b34740;border-color:#b34740;color:#fff;font-weight:600}
+    button.btn.pdf:hover{background:#c4554d}
     .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
     .seg button{font:inherit;color:var(--muted);background:transparent;border:0;padding:7px 12px;cursor:pointer;
       border-right:1px solid var(--line)}
@@ -219,7 +221,7 @@
         <input type="text" id="fId" placeholder="ZK-ECG000" autocomplete="off" spellcheck="false">
         <label for="fDate">Recording date</label>
         <input type="text" id="fDate" placeholder="YYYY-MM-DD" autocomplete="off" spellcheck="false">
-        <button class="btn save" id="btnSavePdf" disabled title="Save the opened PDF, named from the fields above">Export .pdf</button>
+        <button class="btn pdf save" id="btnSavePdf" disabled title="Save the opened PDF, named from the fields above">Export .pdf</button>
         <button class="btn primary save" id="btnExport" disabled title="Export R-R intervals to Excel">Export .xlsx</button>
         <div class="hint filename" id="nameHint"></div>
       </div>
