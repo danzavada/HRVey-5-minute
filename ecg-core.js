@@ -215,7 +215,12 @@
     const pd = [];
     for (const p of paths) {
       if (!(p.width > 0.4 && p.width < 0.8)) continue;
-      if (p.xs.length <= 1) continue;
+      // Match PyMuPDF's filter: `len(d['items']) > 1`, i.e. more than one line
+      // SEGMENT (≥3 vertices), not just ≥2 vertices. Tiny 2-vertex stub paths
+      // carry outlier y-values that widen the strip-boundary histogram range,
+      // shift its bin phase, and split the dense baselines into spurious valleys
+      // — which mis-assigned whole ECG rows on real device PDFs. See [[row-detection-bug]].
+      if (p.xs.length <= 2) continue;
       pd.push({ xs: p.xs, ys: p.ys, med: median(p.ys) });
     }
     if (!pd.length) return empty;

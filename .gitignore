@@ -10,3 +10,6 @@ npm-debug.log*
 
 # Local scratch
 *.tmp
+
+# real patient ECGs — never commit
+broken ECGs/
