@@ -8,7 +8,7 @@ Open `index.html` (or serve the folder and browse to it), then **Open PDF** (or 
 
 - **Sensitivity** slider (toolbar) re-detects live.
 - **Select / Add / Delete** peaks (`S` / `A` / `D`); `Shift+click` adds exactly; annotate a selected beat **PVC** / **PAC** (`P` / `Q`); `Ctrl+Z` undo.
-- **Export .pdf / .xlsx** (right panel), named `<Subject ID>_YYYY_MM_DD` (date read from the PDF).
+- **Export .pdf / .xlsx** (right panel), named `<Subject ID>_YYYY_MM_DD` (date read from the PDF). The `.xlsx` includes an **Analysis** tab; **Load analysis** restores those beats onto the matching PDF.
 - **`N / 14 rows`** badge + **Rows** overlay flag any strip the extractor misses.
 
 A synthetic example ECG is in [`EXAMPLE/`](EXAMPLE/).

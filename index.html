@@ -165,6 +165,7 @@
     <span class="brand"><img src="icons/icon-192.png" alt=""><span>HRVey</span><small>5-MIN</small></span>
     <button class="btn" id="btnOpen" title="Open ECG PDF (Ctrl+O)">Open PDF</button>
     <button class="btn" id="btnClose" title="Close and return to start" disabled>Close</button>
+    <button class="btn" id="btnLoad" title="Load a saved analysis (.xlsx) onto the open PDF" disabled>Load analysis</button>
     <span class="sep"></span>
     <span class="seg" id="modes">
       <button data-mode="select" disabled>Select<kbd>S</kbd></button>
@@ -635,14 +636,20 @@ window.addEventListener("keydown",e=>{
 });
 
 /* ── File open ── */
-function openPicker(){ $("#fileInput").click(); }
-$("#btnOpen").onclick=openPicker;
-$("#fileInput").onchange=e=>{ const f=e.target.files[0]; if(f) openPdfFile(f); e.target.value=""; };
-wrap.addEventListener("click",()=>{ if(!S.base) openPicker(); });
+let pendingKind="pdf";
+function openPicker(kind){ pendingKind=kind||"pdf"; const fi=$("#fileInput");
+  fi.accept = pendingKind==="pdf" ? ".pdf,application/pdf" : ".xlsx"; fi.click(); }
+$("#btnOpen").onclick=()=>openPicker("pdf");
+$("#btnLoad").onclick=()=>openPicker("analysis");
+$("#fileInput").onchange=e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
+  if(pendingKind==="pdf") openPdfFile(f); else loadAnalysis(f); };
+wrap.addEventListener("click",()=>{ if(!S.base) openPicker("pdf"); });
 wrap.addEventListener("dragover",e=>{ e.preventDefault(); wrap.classList.add("drag"); });
 wrap.addEventListener("dragleave",()=>wrap.classList.remove("drag"));
 wrap.addEventListener("drop",e=>{ e.preventDefault(); wrap.classList.remove("drag");
-  const f=e.dataTransfer.files[0]; if(f && /\.pdf$/i.test(f.name)) openPdfFile(f); });
+  const f=e.dataTransfer.files[0]; if(!f) return;
+  if(/\.pdf$/i.test(f.name)) openPdfFile(f);
+  else if(/\.xlsx$/i.test(f.name)) loadAnalysis(f); });
 
 const wait = () => new Promise(r=>setTimeout(r, 0));   // let the status paint between heavy steps
 function pad2(x){ return String(x).padStart(2,"0"); }
@@ -768,14 +775,58 @@ $("#btnSavePdf").onclick=()=>{
 $("#btnExport").onclick=()=>{
   const rr=getRR(); if(!rr.length){ setStatus("No R-R intervals to export."); return; }
   const ann=getAnnotations();
+  const wb=XLSX.utils.book_new();
+  // Tab 1 — R-R intervals
   const aoa=[["Order","RR Interval (ms)","Annotation"]];
   for(let i=0;i<rr.length;i++) aoa.push([i+1, Math.round(rr[i]*10)/10, ann[i]]);
-  const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"]=[{wch:7},{wch:16},{wch:26}];
-  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "RR Intervals");
+  const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=[{wch:7},{wch:16},{wch:26}];
+  XLSX.utils.book_append_sheet(wb, ws, "RR Intervals");
+  // Tab 2 — Analysis: detected beat positions, reloadable via "Load analysis"
+  const rowsA=[["HRVey 5-min analysis"],
+    ["subject_id", (($("#fId").value||"").trim())||"ZK-ECG000"],
+    ["date", $("#fDate").value||""],
+    ["sensitivity", S.sensitivity],
+    ["samples", S.voltage.length],
+    ["source_pdf", S.pdfName],
+    [],
+    ["beat","sample","time_s","tag"]];
+  for(let i=0;i<S.peakIdx.length;i++){ const idx=S.peakIdx[i], t=S.tags[idx];
+    rowsA.push([i+1, idx, Math.round(S.time[idx]*1000)/1000, t?t.toUpperCase():"Normal"]); }
+  const wsA=XLSX.utils.aoa_to_sheet(rowsA); wsA["!cols"]=[{wch:12},{wch:10},{wch:10},{wch:8}];
+  XLSX.utils.book_append_sheet(wb, wsA, "Analysis");
   XLSX.writeFile(wb, baseName()+".xlsx");
-  setStatus(`Exported ${rr.length} R-R intervals to ${baseName()}.xlsx`, true);
+  setStatus(`Exported ${rr.length} R-R intervals + ${S.peakIdx.length} beats to ${baseName()}.xlsx`, true);
 };
+
+/* ── Load a saved analysis (.xlsx "Analysis" tab) onto the open PDF ── */
+async function loadAnalysis(file){
+  if(!S.base){ setStatus("Open the matching ECG PDF first, then load its analysis."); return; }
+  try{
+    const wb=XLSX.read(new Uint8Array(await file.arrayBuffer()),{type:"array"});
+    const ws=wb.Sheets["Analysis"];
+    if(!ws){ setStatus("No 'Analysis' tab in that file — not a HRVey 5-min export."); return; }
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:true});
+    const meta={}; let at=-1;
+    for(let i=0;i<rows.length;i++){ const r=rows[i]||[];
+      if(String(r[0]).toLowerCase()==="beat"){ at=i+1; break; }
+      if(r[0]!=null&&r[0]!=="") meta[String(r[0]).toLowerCase()]=r[1]; }
+    if(at<0){ setStatus("Analysis tab has no beat table."); return; }
+    const n=S.time.length, idxSet=new Set(), tags={};
+    for(let i=at;i<rows.length;i++){ const r=rows[i]||[]; if(r[1]==null||r[1]==="") continue;
+      const s=Math.round(Number(r[1])); if(!isFinite(s)||s<0||s>=n) continue;
+      idxSet.add(s); const t=String(r[3]||"").toLowerCase(); if(t==="pvc"||t==="pac") tags[s]=t; }
+    const peaks=Array.from(idxSet).sort((a,b)=>a-b);
+    if(!peaks.length){ setStatus("No valid beats found in that analysis."); return; }
+    pushUndo();
+    S.peakIdx=peaks; S.autoPeaks=new Set(); S.manualRows={}; S.tags=tags; S.selected=null;
+    if(meta.subject_id!=null&&meta.subject_id!=="") $("#fId").value=String(meta.subject_id);
+    if(meta.date!=null&&meta.date!=="") $("#fDate").value=String(meta.date);
+    const sv=parseInt(meta.sensitivity,10); if(sv>=1&&sv<=10){ S.sensitivity=sv; $("#sensPanel").value=sv; $("#sensPanelVal").textContent=sv; }
+    draw(); syncAnnot(); updateNameHint();
+    const warn=(meta.samples!=null&&Number(meta.samples)!==n)?"  ⚠ signal length differs — beats may be misaligned (different PDF?).":"";
+    setStatus(`Loaded analysis — ${peaks.length} beats restored.${warn}`, true);
+  }catch(err){ console.error(err); setStatus("Load error: "+(err&&err.message||err)); }
+}
 
 /* ── Boot ── */
 window.addEventListener("resize", resize);
