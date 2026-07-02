@@ -2,9 +2,11 @@
 
 R-peak detection for **5-minute vector ECG PDFs**, entirely in the browser — offline, no upload, no install.
 
+**Live:** https://danzavada.github.io/HRVey-5-minute/
+
 ## Use
 
-Open `index.html` (or serve the folder and browse to it), then **Open PDF** (or drag-and-drop). The app extracts the ECG from the PDF's vector paths, detects R-peaks automatically, and lets you review, edit, and export.
+Open the link above (or `index.html` locally), then **Open PDF** (or drag-and-drop). The app extracts the ECG from the PDF's vector paths, detects R-peaks automatically, and lets you review, edit, and export.
 
 - **Sensitivity** slider (toolbar) re-detects live.
 - **Select / Add / Delete** peaks (`S` / `A` / `D`); `Shift+click` adds exactly; annotate a selected beat **PVC** / **PAC** (`P` / `Q`); `Ctrl+Z` undo.
