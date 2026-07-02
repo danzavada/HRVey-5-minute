@@ -51,6 +51,10 @@
     button.btn.on{background:var(--accent-d);border-color:var(--accent-d);color:#fff}
     button.btn.pdf{background:#b34740;border-color:#b34740;color:#fff;font-weight:600}
     button.btn.pdf:hover{background:#c4554d}
+    button.btn.iconbtn{padding:6px 8px;line-height:0;color:var(--muted)}
+    button.btn.iconbtn:hover{color:var(--ink)}
+    .namerow{display:flex;align-items:center;gap:8px;margin-top:10px}
+    .namerow .filename{margin-top:0}
     .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
     .seg button{font:inherit;color:var(--muted);background:transparent;border:0;padding:7px 12px;cursor:pointer;
       border-right:1px solid var(--line)}
@@ -224,7 +228,13 @@
         <input type="text" id="fDate" placeholder="YYYY-MM-DD" autocomplete="off" spellcheck="false">
         <button class="btn pdf save" id="btnSavePdf" disabled title="Save the opened PDF, named from the fields above">Export .pdf</button>
         <button class="btn primary save" id="btnExport" disabled title="Export R-R intervals to Excel">Export .xlsx</button>
-        <div class="hint filename" id="nameHint"></div>
+        <div class="namerow">
+          <button class="btn iconbtn" id="btnCopy" disabled aria-label="Copy row for Excel"
+            title="Copy date + ECG/analysis filenames (tab-separated) to paste into Excel">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          </button>
+          <span class="hint filename" id="nameHint"></span>
+        </div>
       </div>
     </aside>
   </div>
@@ -761,6 +771,17 @@ function updateNameHint(){ $("#nameHint").textContent = S.base ? (baseName()+".p
 $("#fId").oninput=updateNameHint;
 $("#fDate").oninput=updateNameHint;
 
+// Copy "date_of_ecg <tab> ecg_filename <tab> ecg_analysis_filename" for pasting into Excel (3 cells).
+$("#btnCopy").onclick=async()=>{
+  const base=baseName();
+  const date=findDate($("#fDate").value) || (($("#fDate").value||"").trim());
+  const row=`${date}\t${base}.pdf\t${base}.xlsx`;
+  try{ await navigator.clipboard.writeText(row); }
+  catch(e){ const ta=document.createElement("textarea"); ta.value=row; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.select(); try{ document.execCommand("copy"); }catch(_){} ta.remove(); }
+  setStatus(`Copied for Excel:  ${date}  |  ${base}.pdf  |  ${base}.xlsx`, true);
+};
+
 $("#btnSavePdf").onclick=()=>{
   if(!S.pdfBytes) return;
   const blob=new Blob([S.pdfBytes],{type:"application/pdf"});
@@ -784,7 +805,9 @@ $("#btnExport").onclick=()=>{
   // Tab 2 — Analysis: detected beat positions, reloadable via "Load analysis"
   const rowsA=[["HRVey 5-min analysis"],
     ["subject_id", (($("#fId").value||"").trim())||"ZK-ECG000"],
-    ["date", $("#fDate").value||""],
+    ["date_of_ecg", findDate($("#fDate").value) || (($("#fDate").value||"").trim())],
+    ["ecg_filename", baseName()+".pdf"],
+    ["ecg_analysis_filename", baseName()+".xlsx"],
     ["sensitivity", S.sensitivity],
     ["samples", S.voltage.length],
     ["source_pdf", S.pdfName],
@@ -820,7 +843,8 @@ async function loadAnalysis(file){
     pushUndo();
     S.peakIdx=peaks; S.autoPeaks=new Set(); S.manualRows={}; S.tags=tags; S.selected=null;
     if(meta.subject_id!=null&&meta.subject_id!=="") $("#fId").value=String(meta.subject_id);
-    if(meta.date!=null&&meta.date!=="") $("#fDate").value=String(meta.date);
+    const md=(meta.date_of_ecg!=null&&meta.date_of_ecg!=="")?meta.date_of_ecg:meta.date;
+    if(md!=null&&md!=="") $("#fDate").value=String(md);
     const sv=parseInt(meta.sensitivity,10); if(sv>=1&&sv<=10){ S.sensitivity=sv; $("#sensPanel").value=sv; $("#sensPanelVal").textContent=sv; }
     draw(); syncAnnot(); updateNameHint();
     const warn=(meta.samples!=null&&Number(meta.samples)!==n)?"  ⚠ signal length differs — beats may be misaligned (different PDF?).":"";
