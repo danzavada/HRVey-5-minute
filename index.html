@@ -543,7 +543,9 @@ tCanvas.addEventListener("click",e=>{
   if(!S.showTacho || !S._tachoMap) return;
   const r=tCanvas.getBoundingClientRect(), cx=e.clientX-r.left, {padL,plotW,n}=S._tachoMap;
   let i=Math.round((cx-padL)/(n<=1?1:plotW/(n-1))); i=Math.max(0,Math.min(n-1,i));
-  focusPeak(S.peakIdx[i+1]);
+  const beat=S.peakIdx[i+1];
+  S.selected=(S.selected===beat)?null:beat;   // highlight only — don't pan the ECG to it
+  draw(); syncAnnot();
 });
 
 /* ── Panel / status ── */
