@@ -55,6 +55,12 @@
     button.btn.iconbtn:hover{color:var(--ink)}
     .namerow{display:flex;align-items:center;gap:8px;margin-top:10px}
     .namerow .filename{margin-top:0}
+    .patient{font-size:13px;color:var(--ink);background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+      padding:8px 10px;margin:2px 0;-webkit-user-select:text;user-select:text}
+    .patient b{font-weight:600}
+    .patient .rc{color:var(--muted);font-weight:400}
+    .patient .cap{display:block;font-size:10px;color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+    .patient[hidden]{display:none}
     .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
     .seg button{font:inherit;color:var(--muted);background:transparent;border:0;padding:7px 12px;cursor:pointer;
       border-right:1px solid var(--line)}
@@ -117,6 +123,12 @@
     .busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(216,226,230,.75);
       color:var(--ink);font-size:15px;z-index:8}
     .busy[hidden]{display:none}
+    .tacho{position:absolute;left:0;right:0;bottom:0;height:170px;background:rgba(255,255,255,.97);
+      border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(15,30,35,.10);z-index:6}
+    .tacho[hidden]{display:none}
+    .tacho canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:pointer}
+    .tacho .tlabel{position:absolute;left:12px;top:7px;font-size:11px;color:var(--muted);z-index:1;pointer-events:none;
+      text-transform:uppercase;letter-spacing:.05em;font-weight:600}
 
     /* Status bar */
     .statusbar{display:flex;align-items:center;gap:10px;padding:6px 12px;background:var(--panel2);
@@ -191,6 +203,7 @@
     <span class="sep"></span>
     <button class="btn" id="btnRows" title="Highlight the ECG rows the detector recognised (debug)" disabled>Rows</button>
     <span class="rowsbadge" id="rowsBadge" hidden></span>
+    <button class="btn" id="btnTacho" title="Show the R-R interval tachogram" disabled>Tachogram</button>
     <span class="spacer"></span>
   </header>
 
@@ -217,11 +230,16 @@
       <canvas id="ecg"></canvas>
       <div class="zoombadge" id="zoomBadge" title="Click to fit (100%)" style="display:none">100%</div>
       <div class="busy" id="busy" hidden>Working…</div>
+      <div class="tacho" id="tacho" hidden>
+        <span class="tlabel" id="tachoLabel">R-R tachogram</span>
+        <canvas id="tachoCanvas"></canvas>
+      </div>
     </div>
 
     <aside class="panel panel-right">
       <h2><span>Export</span></h2>
       <div class="form">
+        <div class="patient" id="patient" hidden title="Read from the PDF for your reference only — not saved, exported, or copied"></div>
         <label for="fId">Subject ID</label>
         <input type="text" id="fId" placeholder="ZK-ECG000" autocomplete="off" spellcheck="false">
         <label for="fDate">Recording date</label>
@@ -279,7 +297,7 @@ const S = {
   peakIdx:[], autoPeaks:new Set(), manualRows:{}, tags:{},
   history:[], selected:null,
   peakImg:null,               // Float64 pairs, parallel to peakIdx (image space)
-  mode:"select", sensitivity:5, _loading:false, showRows:false,
+  mode:"select", sensitivity:5, _loading:false, showRows:false, showTacho:false, _tachoMap:null,
   keys:{select:"s", add:"a", del:"d"},
   zoom:1, panX:0, panY:0, fitZoom:MIN_ZOOM,
   pdfName:"ecg", pdfBytes:null,
@@ -388,7 +406,7 @@ function resize(){
   const r = wrap.getBoundingClientRect(); cssW=r.width; cssH=r.height;
   canvas.width=Math.max(1,Math.round(cssW*dpr)); canvas.height=Math.max(1,Math.round(cssH*dpr));
   if(S.base){ S.fitZoom=computeFit(); if(S.zoom<S.fitZoom) S.zoom=S.fitZoom; clampPan(); }
-  redraw();
+  redraw(); resizeTacho(); drawTacho();
 }
 function uiScale(){ return Math.min(2.2, Math.max(0.7, Math.pow(S.zoom/Math.max(S.fitZoom,1e-3), 0.4))); }
 
@@ -484,7 +502,47 @@ function drawOverlay(){
       ctx.beginPath(); ctx.arc(x,y,R+4*s,0,7); ctx.strokeStyle=COL.sel; ctx.lineWidth=Math.max(2,2.5*s); ctx.stroke(); }
   }
 }
-function draw(){ redraw(); updatePanel(); }
+function draw(){ redraw(); updatePanel(); drawTacho(); }
+
+/* ── R-R tachogram (toggleable) ── */
+const tCanvas=$("#tachoCanvas"), tCtx=tCanvas.getContext("2d");
+function resizeTacho(){ const el=$("#tacho"); if(el.hidden) return;
+  const r=el.getBoundingClientRect(), d=window.devicePixelRatio||1;
+  tCanvas.width=Math.max(1,Math.round(r.width*d)); tCanvas.height=Math.max(1,Math.round(r.height*d)); }
+function drawTacho(){
+  if(!S.showTacho || $("#tacho").hidden) return;
+  const d=window.devicePixelRatio||1, W=tCanvas.width/d, H=tCanvas.height/d;
+  tCtx.setTransform(d,0,0,d,0,0); tCtx.clearRect(0,0,W,H);
+  const rr=getRR();
+  const padL=48,padR=14,padT=22,padB=20, plotW=W-padL-padR, plotH=H-padT-padB;
+  if(rr.length<1){ tCtx.fillStyle="#6e828a"; tCtx.font="12px system-ui,sans-serif"; tCtx.fillText("No R-R intervals yet.",padL,padT+18);
+    $("#tachoLabel").textContent="R-R tachogram"; S._tachoMap=null; return; }
+  let lo=Infinity,hi=-Infinity; for(const v of rr){ if(v<lo)lo=v; if(v>hi)hi=v; }
+  const med=[...rr].sort((a,b)=>a-b)[rr.length>>1];
+  const span=Math.max(hi-lo,1), yLo=lo-span*0.12, yHi=hi+span*0.12, yr=yHi-yLo;
+  const X=i=> padL + (rr.length===1 ? plotW/2 : plotW*i/(rr.length-1));
+  const Y=v=> padT + plotH*(1-(v-yLo)/yr);
+  tCtx.strokeStyle="#d3dde1"; tCtx.lineWidth=1; tCtx.strokeRect(padL,padT,plotW,plotH);
+  tCtx.fillStyle="#6e828a"; tCtx.font="11px system-ui,sans-serif"; tCtx.textBaseline="middle"; tCtx.textAlign="right";
+  for(const v of [yHi,med,yLo]) tCtx.fillText(Math.round(v)+"", padL-6, Y(v));
+  tCtx.strokeStyle="#94a3b8"; tCtx.setLineDash([5,4]); tCtx.beginPath(); tCtx.moveTo(padL,Y(med)); tCtx.lineTo(padL+plotW,Y(med)); tCtx.stroke(); tCtx.setLineDash([]);
+  tCtx.strokeStyle="#b8c4cb"; tCtx.lineWidth=1.2; tCtx.beginPath();
+  for(let i=0;i<rr.length;i++){ const x=X(i),y=Y(rr[i]); i?tCtx.lineTo(x,y):tCtx.moveTo(x,y); } tCtx.stroke();
+  const cls=C.classifyBeats(S.time,S.peakIdx), R=rr.length>200?1.9:2.7;
+  for(let i=0;i<rr.length;i++){ const beat=S.peakIdx[i+1], x=X(i), y=Y(rr[i]);
+    tCtx.beginPath(); tCtx.arc(x,y,R,0,7); tCtx.fillStyle=peakColor(beat,cls); tCtx.fill();
+    if(beat===S.selected){ tCtx.beginPath(); tCtx.arc(x,y,R+3,0,7); tCtx.strokeStyle="#f59e0b"; tCtx.lineWidth=2; tCtx.stroke(); } }
+  tCtx.fillStyle="#6e828a"; tCtx.textAlign="left"; tCtx.textBaseline="alphabetic"; tCtx.fillText("beat →", padL, H-6);
+  const mean=rr.reduce((a,b)=>a+b,0)/rr.length;
+  $("#tachoLabel").textContent=`R-R tachogram · ${rr.length} intervals · mean ${Math.round(mean)} ms · median ${Math.round(med)} ms`;
+  S._tachoMap={padL,plotW,n:rr.length};
+}
+tCanvas.addEventListener("click",e=>{
+  if(!S.showTacho || !S._tachoMap) return;
+  const r=tCanvas.getBoundingClientRect(), cx=e.clientX-r.left, {padL,plotW,n}=S._tachoMap;
+  let i=Math.round((cx-padL)/(n<=1?1:plotW/(n-1))); i=Math.max(0,Math.min(n-1,i));
+  focusPeak(S.peakIdx[i+1]);
+});
 
 /* ── Panel / status ── */
 function fmt1(x){ return (Math.round(x*10)/10).toFixed(1); }
@@ -672,13 +730,41 @@ function findDate(s){
   return "";
 }
 async function extractRecordingDate(pdf, filename){
+  // Prefer the date PRINTED on the page — the exam time ("Čas zkoušky"), then the
+  // report time ("Čas hlášení"), then any date. PDF-metadata CreationDate is only a
+  // fallback: it is the file's generation time (often a day off from the ECG date).
+  let txt="";
+  for(const pno of [1,2]){ try{ const tc=await (await pdf.getPage(pno)).getTextContent(); txt+=" "+tc.items.map(i=>i.str).join(" "); }catch(e){} }
+  const zk=/zkou[sš]ky[^0-9]{0,12}(\d{4}[-_.\/]\d{1,2}[-_.\/]\d{1,2})/i.exec(txt);
+  const hl=/hlá[sš]en[ ií][^0-9]{0,12}(\d{4}[-_.\/]\d{1,2}[-_.\/]\d{1,2})/i.exec(txt);
+  const dtext=findDate(zk&&zk[1]) || findDate(hl&&hl[1]) || findDate(txt);
+  if(dtext) return dtext;
   try{ const md=await pdf.getMetadata(); const cd=md&&md.info&&(md.info.CreationDate||md.info.ModDate);
     const m=cd&&/D:(\d{4})(\d{2})(\d{2})/.exec(cd); if(m) return `${m[1]}-${m[2]}-${m[3]}`; }catch(e){}
-  for(const pno of [1,2]){                                       // scan cover then ECG page text
-    try{ const pg=await pdf.getPage(pno); const tc=await pg.getTextContent();
-      const d=findDate(tc.items.map(i=>i.str).join(" ")); if(d) return d; }catch(e){}
-  }
   return findDate(filename);
+}
+// Read patient Name (Jméno) + ID (rodné číslo) from the cover page for on-screen
+// reference only. Labels sit in a left column with the value on the same y-row
+// starting with ":" (other ":" lines exist, so pair by row, not order).
+async function extractPatient(pdf){
+  try{
+    const tc=await (await pdf.getPage(1)).getTextContent();
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>({s:i.str.trim(), x:i.transform[4], y:i.transform[5]}));
+    const valFor=(re)=>{ const lab=items.find(i=>re.test(i.s)); if(!lab) return "";
+      const c=items.filter(i=>Math.abs(i.y-lab.y)<4 && i.x>lab.x && i.s[0]===":").sort((a,b)=>a.x-b.x);
+      return c.length ? c[0].s.replace(/^:\s*/,"").trim() : ""; };
+    return { name: valFor(/^Jm[eé]no$/i), id: valFor(/^ID$/i) };
+  }catch(e){ return { name:"", id:"" }; }
+}
+function showPatient(p){
+  const el=$("#patient"); el.textContent="";
+  const name=(p.name||"").replace(/\s*,\s*/, ", ").trim(), id=(p.id||"").trim();
+  if(!name && !id){ el.hidden=true; return; }
+  const cap=document.createElement("span"); cap.className="cap"; cap.textContent="From recording"; el.appendChild(cap);
+  if(name){ const b=document.createElement("b"); b.textContent=name; el.appendChild(b); }
+  if(name && id) el.appendChild(document.createTextNode("  ·  "));
+  if(id){ const s=document.createElement("span"); s.className="rc"; s.textContent=id; el.appendChild(s); }
+  el.hidden=false;
 }
 async function openPdfFile(file){
   if(S._loading) return; S._loading=true; $("#btnOpen").disabled=true;
@@ -702,6 +788,7 @@ async function openPdfFile(file){
     const meta=C.extractEcg(C.extractStrokePaths(ol.fnArray, ol.argsArray, vp1.transform, pdfjsLib.OPS));
     if(!meta.voltage.length){ throw new Error("No ECG vector traces found on page 2 (expected thin 0.4–0.8 pt strokes)."); }
     const recDate=await extractRecordingDate(pdf, file.name);
+    const patient=await extractPatient(pdf);
 
     busy.textContent="Detecting R-peaks…"; await wait();
     const peaks=C.detectPeaks(meta.voltage, S.sensitivity);
@@ -715,7 +802,9 @@ async function openPdfFile(file){
     S.autoPeaks=new Set(S.peakIdx); S.manualRows={}; S.tags={}; S.history=[]; S.selected=null;
     S.pdfName=file.name.replace(/\.pdf$/i,"");
     S.fitZoom=MIN_ZOOM; S.zoom=1;
-    if(recDate) $("#fDate").value=recDate;
+    $("#fId").value="";                                // new import → clear Subject ID
+    $("#fDate").value = recDate || "";
+    showPatient(patient);
     S.showRows = S.validRows.length < N_ROWS;          // auto-reveal the overlay when a strip is missing
     document.querySelectorAll(".btn").forEach(b=>{ if(b.id!=="btnOpen") b.disabled=false; });
     document.querySelectorAll("#modes button, #annot button").forEach(b=>b.disabled=false);
@@ -733,7 +822,9 @@ $("#btnClose").onclick=()=>{
   S.base=null; S.meta=null; S.voltage=null; S.peakIdx=[]; S.selected=null; S.history=[]; S.pdfBytes=null; S.showRows=false;
   wrap.classList.add("empty");
   $("#btnSavePdf").disabled=true; $("#btnExport").disabled=true; $("#sensPanel").disabled=true;
-  $("#fDate").value=""; $("#rowsBadge").hidden=true; $("#btnRows").classList.remove("on");
+  $("#fId").value=""; $("#fDate").value=""; $("#rowsBadge").hidden=true; $("#btnRows").classList.remove("on");
+  $("#patient").hidden=true; $("#patient").textContent="";
+  S.showTacho=false; $("#tacho").hidden=true; $("#btnTacho").classList.remove("on");
   document.querySelectorAll(".btn").forEach(b=>{ if(b.id!=="btnOpen") b.disabled=true; });
   document.querySelectorAll("#modes button, #annot button").forEach(b=>b.disabled=true);
   redraw(); updatePanel(); syncAnnot(); updateNameHint(); setStatus("Open a 5-minute vector ECG PDF to begin.");
@@ -745,6 +836,8 @@ $("#btnPvc").onclick=()=>applyTag("pvc");
 $("#btnPac").onclick=()=>applyTag("pac");
 $("#btnFit").onclick=fitView;
 $("#btnRows").onclick=()=>{ S.showRows=!S.showRows; $("#btnRows").classList.toggle("on",S.showRows); redraw(); };
+$("#btnTacho").onclick=()=>{ S.showTacho=!S.showTacho; $("#tacho").hidden=!S.showTacho;
+  $("#btnTacho").classList.toggle("on",S.showTacho); if(S.showTacho){ resizeTacho(); drawTacho(); } };
 
 /* ── Detection (automatic: on load, and whenever the sensitivity slider moves) ── */
 let _sensT=null;

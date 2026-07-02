@@ -11,5 +11,7 @@ npm-debug.log*
 # Local scratch
 *.tmp
 
-# real patient ECGs — never commit
+# real ECGs — never commit (only the synthetic EXAMPLE is tracked)
+*.pdf
+!EXAMPLE/synthetic_ecg_5min.pdf
 broken ECGs/
