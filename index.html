@@ -100,6 +100,8 @@
     .rrlist li.sel{background:rgba(43,177,166,.28);box-shadow:inset 2px 0 0 var(--accent-d)}
     .rrlist li .i{color:var(--muted)}
     .rrlist li.abn .v{font-weight:700}
+    .rrlist li.excl{opacity:.45}
+    .rrlist li.excl .v{text-decoration:line-through}
     .rrlist .empty{color:var(--muted);padding:8px;font-style:italic}
     .stats{border-top:1px solid var(--line);padding:10px 14px;display:grid;grid-template-columns:auto 1fr;
       gap:6px 10px;font-variant-numeric:tabular-nums}
@@ -203,7 +205,7 @@
     <span class="sep"></span>
     <button class="btn" id="btnRows" title="Highlight the ECG rows the detector recognised (debug)" disabled>Rows</button>
     <span class="rowsbadge" id="rowsBadge" hidden></span>
-    <button class="btn" id="btnTacho" title="Show the R-R interval tachogram" disabled>Tachogram</button>
+    <button class="btn" id="btnTacho" title="Show the R-R interval tachogram (T)" disabled>Tachogram</button>
     <span class="spacer"></span>
   </header>
 
@@ -550,6 +552,13 @@ function getRR(){ // R-R intervals (ms) across all peaks
   const out=[]; for(let i=1;i<S.peakIdx.length;i++) out.push((S.time[S.peakIdx[i]]-S.time[S.peakIdx[i-1]])*1000);
   return out;
 }
+function excludedRR(){ // getRR() indices touching a flagged (aberrant) beat: the interval before AND after
+  const ex=new Set();
+  for(let i=0;i<S.peakIdx.length;i++){ if(!S.tags[S.peakIdx[i]]) continue;
+    if(i>=1) ex.add(i-1);                       // interval ending at the flagged beat
+    if(i<=S.peakIdx.length-2) ex.add(i); }      // interval starting at the flagged beat
+  return ex;
+}
 function getAnnotations(){ // one label per interval, indexed by the later beat
   const out=[]; for(let i=1;i<S.peakIdx.length;i++){ const t=S.tags[S.peakIdx[i]]; out.push(t?t.toUpperCase():"Normal"); }
   return out;
@@ -563,11 +572,12 @@ function updatePanel(){
     li.textContent = S.peakIdx.length ? "Need ≥2 peaks" : "No peaks yet";
     list.appendChild(li);
   } else {
-    const cls=C.classifyBeats(S.time,S.peakIdx);
+    const cls=C.classifyBeats(S.time,S.peakIdx), ex=excludedRR();
     for(let i=0;i<rr.length;i++){
       const beat=S.peakIdx[i+1];
       const li=document.createElement("li");
       if(beat===S.selected) li.classList.add("sel");
+      if(ex.has(i)) li.classList.add("excl");
       const col=peakColor(beat,cls);
       if(cls.long.has(beat)||cls.short.has(beat)||S.tags[beat]) li.classList.add("abn");
       li.innerHTML=`<span class="i"><i class="tag" style="background:${col}"></i>RR${String(i+1).padStart(2,"0")}</span>`+
@@ -576,11 +586,12 @@ function updatePanel(){
       list.appendChild(li);
     }
   }
-  if(rr.length){
-    const mean=rr.reduce((a,b)=>a+b,0)/rr.length;
+  const use=rr.filter((_,i)=>!excludedRR().has(i));   // HRV stats exclude intervals adjacent to flagged beats
+  if(use.length){
+    const mean=use.reduce((a,b)=>a+b,0)/use.length;
     $("#sHR").textContent=fmt1(60000/mean)+" bpm";
     $("#sMean").textContent=Math.round(mean)+" ms";
-    const hv=(rr.length>=2)?hrv(rr):{rmssd:null,sdnn:null};
+    const hv=(use.length>=2)?hrv(use):{rmssd:null,sdnn:null};
     $("#sRMSSD").textContent=hv.rmssd==null?"—":fmt1(hv.rmssd)+" ms";
     $("#sSDNN").textContent=hv.sdnn==null?"—":fmt1(hv.sdnn)+" ms";
   } else { $("#sHR").textContent=$("#sMean").textContent=$("#sRMSSD").textContent=$("#sSDNN").textContent="—"; }
@@ -696,6 +707,7 @@ window.addEventListener("keydown",e=>{
   else if(k===S.keys.add) setMode("add");
   else if(k===S.keys.del) setMode("delete");
   else if(k==="z") fitView();
+  else if(k==="t") $("#btnTacho").click();
   else if(k==="p"){ if(S.selected!=null) applyTag("pvc"); }
   else if(k==="q"){ if(S.selected!=null) applyTag("pac"); }
   else if(k==="delete"||k==="backspace"){ if(S.selected!=null){ pushUndo();
@@ -865,15 +877,16 @@ $("#fId").oninput=updateNameHint;
 $("#fDate").oninput=updateNameHint;
 
 // Copy "date_of_ecg <tab> ecg_filename <tab> ecg_analysis_filename" for pasting into Excel (3 cells).
-$("#btnCopy").onclick=async()=>{
+async function copyExcelRow(){
   const base=baseName();
   const date=findDate($("#fDate").value) || (($("#fDate").value||"").trim());
   const row=`${date}\t${base}.pdf\t${base}.xlsx`;
   try{ await navigator.clipboard.writeText(row); }
   catch(e){ const ta=document.createElement("textarea"); ta.value=row; ta.style.position="fixed"; ta.style.opacity="0";
     document.body.appendChild(ta); ta.select(); try{ document.execCommand("copy"); }catch(_){} ta.remove(); }
-  setStatus(`Copied for Excel:  ${date}  |  ${base}.pdf  |  ${base}.xlsx`, true);
-};
+  return `${date}  |  ${base}.pdf  |  ${base}.xlsx`;
+}
+$("#btnCopy").onclick=async()=>{ setStatus(`Copied for Excel:  ${await copyExcelRow()}`, true); };
 
 $("#btnSavePdf").onclick=()=>{
   if(!S.pdfBytes) return;
@@ -891,9 +904,10 @@ $("#btnExport").onclick=()=>{
   const ann=getAnnotations();
   const wb=XLSX.utils.book_new();
   // Tab 1 — R-R intervals
-  const aoa=[["Order","RR Interval (ms)","Annotation"]];
-  for(let i=0;i<rr.length;i++) aoa.push([i+1, Math.round(rr[i]*10)/10, ann[i]]);
-  const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=[{wch:7},{wch:16},{wch:26}];
+  const ex=excludedRR();
+  const aoa=[["Order","RR Interval (ms)","Annotation","Excluded"]];
+  for(let i=0;i<rr.length;i++) aoa.push([i+1, Math.round(rr[i]*10)/10, ann[i], ex.has(i)?"excluded":""]);
+  const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=[{wch:7},{wch:16},{wch:26},{wch:10}];
   XLSX.utils.book_append_sheet(wb, ws, "RR Intervals");
   // Tab 2 — Analysis: detected beat positions, reloadable via "Load analysis"
   const rowsA=[["HRVey 5-min analysis"],
@@ -911,7 +925,8 @@ $("#btnExport").onclick=()=>{
   const wsA=XLSX.utils.aoa_to_sheet(rowsA); wsA["!cols"]=[{wch:12},{wch:10},{wch:10},{wch:8}];
   XLSX.utils.book_append_sheet(wb, wsA, "Analysis");
   XLSX.writeFile(wb, baseName()+".xlsx");
-  setStatus(`Exported ${rr.length} R-R intervals + ${S.peakIdx.length} beats to ${baseName()}.xlsx`, true);
+  copyExcelRow();   // also stage the date + filenames for pasting into Excel, same as the clipboard button
+  setStatus(`Exported ${rr.length} R-R intervals + ${S.peakIdx.length} beats to ${baseName()}.xlsx  ·  filenames copied for Excel`, true);
 };
 
 /* ── Load a saved analysis (.xlsx "Analysis" tab) onto the open PDF ── */
