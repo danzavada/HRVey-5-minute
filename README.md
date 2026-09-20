@@ -1,6 +1,6 @@
 # HRVey 5-min
 
-R-peak detection for **5-minute vector ECG PDFs**, entirely in the browser — offline, no upload, no install.
+R-peak detection for **5-minute (and 1-minute) vector ECG PDFs**, entirely in the browser — offline, no upload, no install.
 
 **Live:** https://danzavada.github.io/HRVey-5-minute/
 
@@ -17,7 +17,12 @@ A synthetic example ECG is in [`EXAMPLE/`](EXAMPLE/).
 
 ## Expected PDF
 
-Two pages, ECG on **page 2** as thin (0.4–0.8 pt) vector strokes in 14 stacked strips (12.5 mm/s, 2.5 mm/mV). Scanned/raster ECGs are not supported.
+The device's vector reports, with the ECG drawn as thin (0.4–0.8 pt) strokes in stacked strips:
+
+- **5-minute report** — two pages, ECG on page 2 in 14 strips (12.5 mm/s, 2.5 mm/mV).
+- **1-minute report** — one page, ECG under the header in 3 strips + a short stub (12.5 mm/s, 2.5 mm/mV) or 6 strips + stub (25 mm/s, 10 mm/mV).
+
+The ECG page, the strip count and the paper speed / gain (printed in the page footer) are detected from the file. Scanned/raster ECGs are not supported.
 
 ## Stack
 

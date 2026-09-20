@@ -15,3 +15,4 @@ npm-debug.log*
 *.pdf
 !EXAMPLE/synthetic_ecg_5min.pdf
 broken ECGs/
+problematic ecgs/

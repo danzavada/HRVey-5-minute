@@ -13,14 +13,28 @@
   "use strict";
 
   // ── Physical constants (verbatim from ecg_viewer.py) ──────────────────── //
+  // PAPER_SPEED / VOLT_SCALE are the defaults for the 5-minute report; a
+  // document may override them (e.g. the 1-minute report prints at
+  // 25 mm/s 10 mm/mV) — see parseScale() and extractEcg(paths, opts).
   const PAPER_SPEED = 12.5;
   const VOLT_SCALE  = 2.5;
   const PT_PER_MM   = 2.834645669291339;
-  const N_ROWS      = 14;
+  const N_ROWS      = 14;          // strips in the 5-minute (2-page) report
   const FS          = 2000;
   const S_PER_PT    = 1.0 / (PAPER_SPEED * PT_PER_MM);
   const MV_PER_PT   = 1.0 / (VOLT_SCALE  * PT_PER_MM);
   const ABNORMAL_THRESHOLD = 0.2;
+
+  // Read "12.5mm/s 2.5mm/mV" / "25mm/s 10mm/mV" from the page text. Returns
+  // nulls for whatever is not printed so the caller can fall back to defaults.
+  function parseScale(text) {
+    const t = String(text || "");
+    const sp = /(\d+(?:[.,]\d+)?)\s*mm\s*\/\s*s(?![a-z])/i.exec(t);
+    const vs = /(\d+(?:[.,]\d+)?)\s*mm\s*\/\s*mv/i.exec(t);
+    const num = (m) => (m ? parseFloat(m[1].replace(",", ".")) : NaN);
+    const a = num(sp), b = num(vs);
+    return { paperSpeed: a > 0 ? a : null, voltScale: b > 0 ? b : null };
+  }
 
   // Fixed Butterworth band-pass (order 2, 5–15 Hz @ 2000 Hz) + filtfilt zi.
   // Precomputed with scipy so results are bit-comparable to the desktop app.
@@ -183,44 +197,92 @@
     return { counts, edges };
   }
 
-  // ── strip-boundary detection (mirrors _find_strip_boundaries) ─────────── //
+  // ── strip-boundary detection ──────────────────────────────────────────── //
+  // Strips are separated by horizontal bands that no trace enters. Build a
+  // 1-pt histogram of every stroke vertex's y, cut it at runs of ≥ MIN_GAP
+  // (near-)empty bins, then fold fragments back into their neighbours: a
+  // fragment that is too light to be a strip (an artifact plateau carved off
+  // its own trace), or one sitting closer than half the strip pitch to its
+  // neighbour (a plateau cannot lie between two strips that ARE a pitch
+  // apart). The number of strips is whatever survives — 14 for the 5-minute
+  // report, 4 or 7 for the 1-minute reports (3/6 full strips + a 1.2 s stub).
+  // The previous density-valley approach needed a fixed strip count and lost
+  // the stub: with ~2 % of the vertices it never produced a deep enough valley.
+  // Returns the boundary y's (ascending, in page points), i.e. n_rows - 1 values.
   function findStripBoundaries(pathYs) {
-    let all = [];
-    for (const ys of pathYs) all = all.concat(Array.from(ys));
-    const arr = Float64Array.from(all);
-    let yLo = Infinity, yHi = -Infinity;
-    for (let i = 0; i < arr.length; i++) { if (arr[i] < yLo) yLo = arr[i]; if (arr[i] > yHi) yHi = arr[i]; }
-    if (yHi <= yLo) return [];
-    const nBins = Math.max(100, Math.floor(yHi - yLo));
-    const { counts, edges } = histogram(arr, nBins);
-    const win = Math.max(3, Math.floor(nBins / (N_ROWS * 4)));
-    const density = uniformFilter1d(counts, win);
-    let dmax = -Infinity; for (let i = 0; i < density.length; i++) if (density[i] > dmax) dmax = density[i];
-    const neg = new Float64Array(density.length); for (let i = 0; i < density.length; i++) neg[i] = -density[i];
-    const valleys = findPeaks(neg, { prominence: dmax * 0.25 });
-    if (!valleys.length) return [];
-    const binW = edges[1] - edges[0];
-    const out = valleys.map((v) => edges[v] + binW / 2);
-    out.sort((a, b) => a - b);
+    let total = 0, yLo = Infinity, yHi = -Infinity;
+    for (const ys of pathYs) for (let i = 0; i < ys.length; i++) {
+      const v = ys[i]; if (v < yLo) yLo = v; if (v > yHi) yHi = v; total++;
+    }
+    if (!(yHi > yLo)) return [];
+    const nBins = Math.ceil(yHi - yLo) + 1;
+    const counts = new Float64Array(nBins);
+    for (const ys of pathYs) for (let i = 0; i < ys.length; i++) counts[Math.floor(ys[i] - yLo)]++;
+
+    const EPS = Math.max(1, total * 1e-4); // a bin this sparse is an artifact trail, not a strip
+    const MIN_GAP = 3;                     // bins; a steep upstroke may skip 1–2 bins of its own strip
+    const MIN_MASS = 0.01;                 // fraction of all vertices a strip must hold (a stub has ~2 %)
+
+    // maximal runs of non-empty bins, split wherever ≥ MIN_GAP empty bins intervene
+    const segs = [];                       // {lo, hi}: inclusive bin range
+    let lo = -1, last = -1;
+    for (let b = 0; b < nBins; b++) {
+      if (counts[b] <= EPS) continue;
+      if (lo < 0 || b - last - 1 >= MIN_GAP) { if (lo >= 0) segs.push({ lo, hi: last }); lo = b; }
+      last = b;
+    }
+    if (lo >= 0) segs.push({ lo, hi: last });
+    const weigh = (s) => { let m = 0, c = 0; for (let b = s.lo; b <= s.hi; b++) { m += counts[b]; c += counts[b] * (b + 0.5); } s.mass = m; s.c = m ? c / m : (s.lo + s.hi) / 2; return s; };
+    segs.forEach(weigh);
+    const fold = (i, into) => { const a = segs[i], b = segs[into]; b.lo = Math.min(a.lo, b.lo); b.hi = Math.max(a.hi, b.hi); weigh(b); segs.splice(i, 1); };
+    const nearer = (i) => (i === 0 ? 1 : i === segs.length - 1 ? i - 1
+      : (segs[i].c - segs[i - 1].c <= segs[i + 1].c - segs[i].c ? i - 1 : i + 1));
+
+    while (segs.length > 1) {
+      let li = 0; for (let i = 1; i < segs.length; i++) if (segs[i].mass < segs[li].mass) li = i;
+      if (segs[li].mass < MIN_MASS * total) { fold(li, nearer(li)); continue; }
+      if (segs.length < 3) break;
+      const gaps = []; for (let i = 1; i < segs.length; i++) gaps.push(segs[i].c - segs[i - 1].c);
+      const pitch = median(gaps);
+      let gi = 0; for (let i = 1; i < gaps.length; i++) if (gaps[i] < gaps[gi]) gi = i;
+      if (gaps[gi] < 0.5 * pitch) { const a = gi, b = gi + 1; if (segs[a].mass < segs[b].mass) fold(a, b); else fold(b, a); continue; }
+      break;
+    }
+    const out = [];
+    for (let i = 1; i < segs.length; i++) out.push(yLo + (segs[i - 1].hi + 1 + segs[i].lo) / 2);
     return out;
   }
 
   // ── main extraction (mirrors extract_ecg) ─────────────────────────────── //
+  // ECG-candidate paths: thin strokes (the trace is 0.567 pt; grid lines are
+  // fills or 0/1.134 pt) with more than one line SEGMENT (≥3 vertices), matching
+  // PyMuPDF's `len(d['items']) > 1`. Tiny 2-vertex stub paths carry outlier
+  // y-values that mis-assigned whole ECG rows on real device PDFs. See [[row-detection-bug]].
+  function isEcgPath(p) { return p.width > 0.4 && p.width < 0.8 && p.xs.length > 2; }
+  // Vertex count of the ECG-candidate paths — used to pick the page that carries
+  // the trace (a 2-page report's summary page has a few hundred from the R-R graph).
+  function countEcgVertices(paths) {
+    let n = 0; for (const p of paths) if (isEcgPath(p)) n += p.xs.length; return n;
+  }
+
   // paths: [{width:Number, xs:Float64Array, ys:Float64Array}] — all stroked paths.
-  function extractEcg(paths) {
+  // opts:  {paperSpeed (mm/s), voltScale (mm/mV)} — defaults 12.5 / 2.5.
+  // The strip count is detected, not assumed: 14 for the 5-minute report, 4 or
+  // 7 for the 1-minute ones. Row indices in raw_r / cum_t / baseline_y run
+  // 0..n_rows-1 top to bottom.
+  function extractEcg(paths, opts) {
+    opts = opts || {};
+    const paperSpeed = opts.paperSpeed > 0 ? opts.paperSpeed : PAPER_SPEED;
+    const voltScale  = opts.voltScale  > 0 ? opts.voltScale  : VOLT_SCALE;
+    const sPerPt = 1.0 / (paperSpeed * PT_PER_MM), mvPerPt = 1.0 / (voltScale * PT_PER_MM);
     const empty = { time: new Float64Array(0), voltage: new Float64Array(0),
-      cum_t: new Float64Array(N_ROWS), baseline_y: new Float64Array(N_ROWS),
-      x_left: 0, y_min: 0, band: 1, raw_r: new Int8Array(0) };
+      cum_t: new Float64Array(0), baseline_y: new Float64Array(0), n_rows: 0,
+      x_left: 0, y_min: 0, band: 1, raw_r: new Int8Array(0),
+      paper_speed: paperSpeed, volt_scale: voltScale, s_per_pt: sPerPt, mv_per_pt: mvPerPt };
 
     const pd = [];
     for (const p of paths) {
-      if (!(p.width > 0.4 && p.width < 0.8)) continue;
-      // Match PyMuPDF's filter: `len(d['items']) > 1`, i.e. more than one line
-      // SEGMENT (≥3 vertices), not just ≥2 vertices. Tiny 2-vertex stub paths
-      // carry outlier y-values that widen the strip-boundary histogram range,
-      // shift its bin phase, and split the dense baselines into spurious valleys
-      // — which mis-assigned whole ECG rows on real device PDFs. See [[row-detection-bug]].
-      if (p.xs.length <= 2) continue;
+      if (!isEcgPath(p)) continue;
       pd.push({ xs: p.xs, ys: p.ys, med: median(p.ys) });
     }
     if (!pd.length) return empty;
@@ -230,24 +292,20 @@
     for (const p of pd) for (let i = 0; i < p.xs.length; i++) if (p.xs[i] < xLeft) xLeft = p.xs[i];
     const meds = pd.map((p) => p.med);
     const yMin = meds[0], yMax = meds[meds.length - 1];
-    const band = yMax > yMin ? (yMax - yMin) / Math.max(N_ROWS - 1, 1) : 1.0;
 
     const boundaries = findStripBoundaries(pd.map((p) => p.ys));
-    const rows = meds.map((m) => {
-      let r;
-      if (boundaries.length) r = searchsortedLeft(boundaries, m);
-      else r = Math.round((m - yMin) / band);
-      return Math.min(Math.max(r, 0), N_ROWS - 1);
-    });
+    const nRows = boundaries.length + 1;
+    const band = nRows > 1 ? (yMax - yMin) / (nRows - 1) : 1.0;
+    const rows = meds.map((m) => searchsortedLeft(boundaries, m));
 
-    const rowXs = Array.from({ length: N_ROWS }, () => []);
-    const rowYs = Array.from({ length: N_ROWS }, () => []);
+    const rowXs = Array.from({ length: nRows }, () => []);
+    const rowYs = Array.from({ length: nRows }, () => []);
     for (let i = 0; i < pd.length; i++) { rowXs[rows[i]].push(pd[i].xs); rowYs[rows[i]].push(pd[i].ys); }
 
-    const xEnds = new Float64Array(N_ROWS), baseYs = new Float64Array(N_ROWS), cumT = new Float64Array(N_ROWS);
+    const xEnds = new Float64Array(nRows), baseYs = new Float64Array(nRows), cumT = new Float64Array(nRows);
     const tParts = [], vParts = [], rParts = [];
     let lastValid = -1;
-    for (let r = 0; r < N_ROWS; r++) {
+    for (let r = 0; r < nRows; r++) {
       if (!rowXs[r].length) continue;
       let rx = concatF64(rowXs[r]), ry = concatF64(rowYs[r]);
       const order = Array.from(rx.keys()).sort((a, b) => rx[a] - rx[b]);
@@ -256,12 +314,12 @@
       rx = sx; ry = sy;
       let mx = -Infinity; for (let i = 0; i < rx.length; i++) if (rx[i] > mx) mx = rx[i];
       xEnds[r] = mx; baseYs[r] = median(ry);
-      if (lastValid >= 0) cumT[r] = cumT[lastValid] + (xEnds[lastValid] - xLeft) * S_PER_PT;
+      if (lastValid >= 0) cumT[r] = cumT[lastValid] + (xEnds[lastValid] - xLeft) * sPerPt;
       lastValid = r;
       const t = new Float64Array(rx.length), v = new Float64Array(rx.length), rr = new Int8Array(rx.length);
       for (let i = 0; i < rx.length; i++) {
-        t[i] = cumT[r] + (rx[i] - xLeft) * S_PER_PT;
-        v[i] = (baseYs[r] - ry[i]) * MV_PER_PT;
+        t[i] = cumT[r] + (rx[i] - xLeft) * sPerPt;
+        v[i] = (baseYs[r] - ry[i]) * mvPerPt;
         rr[i] = r;
       }
       tParts.push(t); vParts.push(v); rParts.push(rr);
@@ -297,8 +355,24 @@
         vUni[i] = uvA[j] + f * (uvA[j + 1] - uvA[j]);
       }
     }
-    return { time: tUni, voltage: vUni, cum_t: cumT, baseline_y: baseYs,
-      x_left: xLeft, y_min: yMin, band, raw_r: concatI8(rParts) };
+    return { time: tUni, voltage: vUni, cum_t: cumT, baseline_y: baseYs, n_rows: nRows,
+      x_left: xLeft, y_min: yMin, band, raw_r: concatI8(rParts),
+      paper_speed: paperSpeed, volt_scale: voltScale, s_per_pt: sPerPt, mv_per_pt: mvPerPt };
+  }
+
+  // How many strips the page LAYOUT has room for, from the baselines that were
+  // found: strips sit on a regular pitch, so span/pitch + 1 counts a strip the
+  // extractor merged into a neighbour (the pitch is the median baseline gap,
+  // which survives one missing strip). Only strips with a baseline are counted.
+  function expectedRows(meta) {
+    const ys = [];
+    const seen = new Set(meta.raw_r);
+    for (let r = 0; r < meta.n_rows; r++) if (seen.has(r)) ys.push(meta.baseline_y[r]);
+    if (ys.length < 2) return ys.length;
+    ys.sort((a, b) => a - b);
+    const gaps = []; for (let i = 1; i < ys.length; i++) gaps.push(ys[i] - ys[i - 1]);
+    const pitch = median(gaps);
+    return pitch > 0 ? Math.round((ys[ys.length - 1] - ys[0]) / pitch) + 1 : ys.length;
   }
 
   function concatF64(list) {
@@ -411,7 +485,8 @@
     median, mean, std, uniformFilter1d, lfilter, filtfilt, findPeaks, peakProminences,
     localMaxima1d, histogram, searchsortedLeft,
     // pipeline
-    findStripBoundaries, extractEcg, detectPeaks, classifyBeats, extractStrokePaths,
+    parseScale, isEcgPath, countEcgVertices, findStripBoundaries, extractEcg, expectedRows,
+    detectPeaks, classifyBeats, extractStrokePaths,
   };
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));
 if (typeof module !== "undefined") module.exports = (typeof window !== "undefined" ? window : globalThis).ECGCore;
